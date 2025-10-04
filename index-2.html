@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Антисрыв — Telegram Mini App</title>
+  <meta name="theme-color" content="#2563eb" />
+  <style>
+    html,body{height:100%;margin:0}
+    body{background:#fff;color:#1f2937;font-family:ui-sans-serif,system-ui,-apple-system,Roboto,Helvetica,Arial}
+    body,button{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  </style>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    // simplified safe start script
+    function App() {
+      return <div style={{padding:20, fontFamily:'sans-serif'}}>
+        <h1>🛡️ Антисрыв Mini App</h1>
+        <p>Приложение успешно загружено. Теперь можно пройти чек-ин.</p>
+      </div>;
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App/>);
+  </script>
+</body>
+</html>
