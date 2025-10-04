@@ -144,8 +144,8 @@
         </div>
         <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
           <button onClick={onOpenProtocol} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card}}>Стоп-протокол</button>
-          <button onClick={onOpenFoods} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card,textDecoration:"underline",cursor:"pointer"}}>Список продуктов</button>
-          <button onClick={onNewCheckin} style={btnPrimary(theme)}>Новый чек-ин</button>
+          <button onClick={onOpenFoods} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card,cursor:"pointer"}}>Список продуктов</button>
+          <button onClick={onNewCheckin} style={btnPrimary(theme)}>Чек-ин</button>
         </div>
       </div>);
     }
@@ -224,7 +224,7 @@
         <div style={{fontWeight:700,fontSize:18,marginBottom:6}}>Продукты для здоровья</div>
         <div style={{fontSize:13,color:theme.subtext,marginBottom:12}}>Ориентир тарелки: 1/2 клетчатка · 1/4 белок · 1/4 сложные углеводы + полезные жиры.</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
-          {[{id:"p-animal",label:"Белки"},{id:"carbs",label:"Углеводы"},{id:"fiber",label:"Клетчатка"},{id:"fats",label:"Полезные жиры"}].map(function(link){
+          {[{id:"p-animal",label:"Белки"},{id:"carbs",label:"Углеводы"},{id:"fiber",label:"Клетчатка"},{id:"fats",label:"Жиры"}].map(function(link){
             return (<button key={link.id} onClick={function(){go(link.id);}} style={{fontSize:13,padding:"6px 10px",borderRadius:999,border:"1px solid #e5e7eb",background:"#fff",textDecoration:"underline",cursor:"pointer"}}>{link.label}</button>);
           })}
         </div>
