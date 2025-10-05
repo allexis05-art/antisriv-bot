@@ -363,6 +363,8 @@
       const [i,setI] = useState(0);
       const [state,setState] = useState({carbs_ok:null,water_ok:null,mood:null,urge:null,binge:null,trigger:null});
       const [sent,setSent] = useState(null);
+      const debug = (typeof window !== "undefined") && /(?:^|[?&])debug=1(?:&|$)/.test((window.location && window.location.search) || "");
+
 
       useEffect(function(){
         if (typeof window==="undefined") return;
@@ -420,7 +422,7 @@
            : screen==="foods" ? (<FoodsCard theme={theme} />)
            : screen==="done" ? (<DoneCard theme={theme} state={state} />)
            : (<CheckinCard theme={theme} i={i} step={step} state={state} setState={setState} next={next} back={back} progress={progress} handleSubmit={handleSubmit} />)}
-          {sent && (<pre style={{marginTop:16,padding:12,background:theme.card,borderRadius:12,whiteSpace:"pre-wrap",wordBreak:"break-word",border:"1px solid "+theme.border}}>{sent}</pre>)}
+          {debug && sent && (<pre style={{marginTop:16,padding:12,background:theme.card,borderRadius:12,whiteSpace:"pre-wrap",wordBreak:"break-word",border:"1px solid "+theme.border}}>{sent}</pre>)}
         </div>
       </div>);
     }
