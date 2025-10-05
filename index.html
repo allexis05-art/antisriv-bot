@@ -1,418 +1,484 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Антисрыв — Telegram Mini App</title>
-  <meta name="theme-color" content="#2563eb" />
-  <style>
-    html,body{height:100%;margin:0}
-    body{background:#fff;color:#1f2937;font-family:ui-sans-serif,system-ui,-apple-system,Roboto,Helvetica,Arial}
-    body,button{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
-  </style>
-  <!-- Telegram Web Apps SDK -->
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <!-- React 18 UMD -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel (чтобы не собирать) -->
-  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
-</head>
-<body>
-  <div id="root"></div>
+import React, { useEffect, useMemo, useState } from "react";
 
-  <!-- ВЕСЬ КОД ПРИЛОЖЕНИЯ -->
-  <script type="text/babel">
-    const {useEffect,useMemo,useState} = React;
+// === Telegram Mini App: "Антисрыв" (ES2019/Safari-safe) ===
+// - Экран завершения (Done) — надёжно виден в Chrome/Safari.
+// - Кнопки в шапке сквозные на всех экранах.
+// - Доп. вопрос при срыве: «что послужило триггером?» + варианты.
+// - Вода — второй шаг с рекомендацией по суточному объёму.
+// - Никаких `$1` и валидаторов; «Дальше/Готово» всегда активны.
 
-    // === код из канаваса, адаптированный под браузер ===
-    function get(obj, path, fallback) {
-      try{
-        var cur=obj;
-        for (var i=0;i<path.length;i++){ if(cur==null) return fallback; cur=cur[path[i]]; }
-        return cur==null?fallback:cur;
-      }catch(_){return fallback;}
+// ===== UTILS =====
+function get(obj, path, fallback) {
+  try {
+    var cur = obj;
+    for (var i = 0; i < path.length; i++) {
+      if (cur == null) return fallback;
+      cur = cur[path[i]];
     }
-    function useTelegram(){
-      const tg = React.useMemo(function(){
-        if (typeof window === "undefined") return undefined;
-        return get(window, ["Telegram","WebApp"], undefined);
-      },[]);
-      return tg;
-    }
-    function useTheme(tg){
-      const [theme,setTheme] = useState({
-        bg:"#ffffff", text:"#1f2937", subtext:"#6b7280",
-        accent:"#2563eb", card:"#f3f4f6", border:"#e5e7eb"
-      });
-      useEffect(function(){
-        if(!tg) return;
-        var bg=(tg.themeParams&&tg.themeParams.bg_color)||theme.bg;
-        var text=(tg.themeParams&&tg.themeParams.text_color)||theme.text;
-        var hint=(tg.themeParams&&tg.themeParams.hint_color)||theme.subtext;
-        var button=(tg.themeParams&&tg.themeParams.button_color)||theme.accent;
-        var secondaryBg=(tg.themeParams&&tg.themeParams.secondary_bg_color)||theme.card;
-        setTheme({bg:text?bg:"#fff", text, subtext:hint, accent:button, card:secondaryBg, border:"#e5e7eb"});
-      },[tg]);
-      return theme;
-    }
+    return cur == null ? fallback : cur;
+  } catch (_) { return fallback; }
+}
 
-    var steps=["carbs","water","mood","urge","binge"];
+function useTelegram() {
+  const tg = useMemo(function(){
+    if (typeof window === "undefined") return undefined;
+    return get(window, ["Telegram", "WebApp"], undefined);
+  }, []);
+  return tg;
+}
 
-    function pickPrimaryAdvice(state){
-      var s=state||{}; var urgeVal = isFinite(s.urge)? s.urge : 0;
-      if(s.binge===true){
-        return { title:"Если был эпизод срыва/переедания — мягкий возврат",
-          items:["⏰ Ложись спать вовремя (до 23:00)","🍳 Белки+медленные углеводы утром (например, омлет с овощами)","🚶 Короткая прогулка днём","🍽 Обычный ужин без «компенсаций», никаких наказаний, чай лучше пропустить"] };
-      }
-      if(urgeVal>=2){
-        return { title:"Тяга ≥ 2 — подключаем осознанность и «Стоп-протокол»",
-          items:["Если ела более 3 часов назад: собери здоровую тарелку / перекуси горстью тыквенных семечек","Если голод эмоциональный → замени действием: прогулка, чтение, душ или просто полежать 15 минут","Если тяга к сладкому не ушла → разреши себе маленькую порцию. Выбирай сухофрукты или натуральную пастилу.","Подробнее по кнопке Стоп-протокол"] };
-      }
-      if(s.carbs_ok===false){
-        return { title:"Недобор медленных углеводов и белка",
-          items:["Перекус: овощ/фрукт + яйцо/ кусочек козьего сыра","К ужину крахмалистый или зерновой гарнир + рыба/курица/креветки/1 яйцо","Ориентир: 1–2 ладони медленных углеводов + 1–2 ладони белка"] };
-      }
-      if(s.water_ok===false){
-        return { title:"Мало воды сегодня",
-          items:["Не добирай объём вечером: пей не больше 1-2 стаканов за 2 часа до сна","Завтра постарайся выйти на норму (~30 мл/кг в сутки)","Начни утро со стакана-двух теплой воды и распределяй в течение дня не более 300 мл за раз"] };
-      }
-      return null;
-    }
+function useTheme(tg) {
+  const [theme, setTheme] = useState({
+    bg: "#ffffff",
+    text: "#1f2937",
+    subtext: "#6b7280",
+    accent: "#2563eb",
+    card: "#f3f4f6",
+    border: "#e5e7eb",
+  });
+  useEffect(function(){
+    if (typeof window === "undefined") return;
+    var loc = (window.location || {});
+    var qs = (typeof loc.search === 'string' && loc.search) || (typeof loc.query === 'string' && loc.query) || "";
+    var q = new URLSearchParams(qs);
+    if (((q.get("screen") || "").toLowerCase()) === "protocol") setScreen("protocol");
+  }, []);
 
-    function Progress(props){
-      var value=props.value, accent=props.accent;
-      return (<div style={{marginBottom:12}}>
-        <div style={{height:8,width:"100%",background:"rgba(0,0,0,0.08)",borderRadius:999}}>
-          <div style={{height:8,width:value+'%',background:accent,borderRadius:999,transition:"width .25s ease"}} />
-        </div>
-        <div style={{fontSize:12,marginTop:6,opacity:0.75}}>{value}%</div>
-      </div>);
-    }
-    function Section(props){
-      var title=props.title, subtitle=props.subtitle, children=props.children;
-      return (<div style={{marginBottom:8}}>
-        <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>{title}</div>
-        {subtitle && <div style={{fontSize:13,opacity:0.7,marginBottom:8}}>{subtitle}</div>}
-        {children}
-      </div>);
-    }
-    function Row(props){
-      return <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{props.children}</div>;
-    }
-    function ChoiceBtn(props){
-      var active=props.active, onClick=props.onClick, children=props.children;
-      return (<button onClick={onClick} style={{padding:"14px 12px",borderRadius:12,border:"1px solid "+(active?"transparent":"#e5e7eb"),background:active?"rgba(37,99,235,0.12)":"#fff",fontWeight:600}}>{children}</button>);
-    }
-    function btnPrimary(theme){return {padding:"12px 14px",borderRadius:12,background:theme.accent,color:"#fff",border:"none",fontWeight:700};}
-    function btnOutline(theme){return {padding:"12px 14px",borderRadius:12,background:"#fff",color:theme.text, border:"1px solid "+theme.border,fontWeight:600};}
+  useEffect(function(){
+    if (!tg) return;
+    if (tg.ready) tg.ready();
+    if (tg.expand) tg.expand();
+    if (tg.MainButton && tg.MainButton.setParams) tg.MainButton.setParams({ text: screen === "checkin" ? "Отправить" : "Закрыть" });
+    if (tg.MainButton && tg.MainButton.show) tg.MainButton.show();
+    var onMainButton = function(){ if (screen === "checkin") handleSubmit(); else if (tg.close) tg.close(); };
+    if (tg.onEvent) tg.onEvent("mainButtonClicked", onMainButton);
+    return function(){ if (tg.offEvent) tg.offEvent("mainButtonClicked", onMainButton); };
+  }, [tg, screen, state]);
 
-    function FoodsTable(props){
-      var theme=props.theme, title=props.title, rows=props.rows;
-      return (<div style={{background:"#fff",border:"1px solid "+props.theme.border,borderRadius:12,overflow:"hidden"}}>
-        <div style={{padding:"8px 12px",fontWeight:600,background:"rgba(0,0,0,0.03)"}}>{title}</div>
-        <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>
-          {rows.map(function(r,idx){return (
+  var step = steps[i];
+  var progress = Math.round((i / steps.length) * 100);
+
+  function next(){
+    setI(function(p){ return Math.min(p + 1, steps.length - 1); });
+    var hf = get(tg, ["HapticFeedback", "impactOccurred"], null); if (hf) hf("light");
+  }
+  function back(){ setI(function(p){ return Math.max(p - 1, 0); }); }
+
+  function handleSubmit(){
+    if (i < steps.length - 1) return; // только на последнем шаге
+    var userId = get(tg, ["initDataUnsafe", "user", "id"], null);
+    var payload = {
+      type: "checkin",
+      ts: Math.floor(Date.now() / 1000),
+      user_id: userId,
+      carbs_ok: state.carbs_ok,
+      water_ok: state.water_ok,
+      mood: state.mood,
+      urge: state.urge,
+      binge: state.binge,
+      trigger: state.trigger,
+    };
+    var json = JSON.stringify(payload);
+    var send = get(tg, ["sendData"], null);
+    if (send) {
+      send(json);
+      setSent(json);
+      var note = get(tg, ["HapticFeedback", "notificationOccurred"], null); if (note) note("success");
+    } else { setSent(json); try { console.info("Check-in JSON", json); } catch(_){} }
+    setScreen("done");
+    try { if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(_){}
+  }
+
+  function resetCheckin(){
+    setState({ carbs_ok: null, water_ok: null, mood: null, urge: null, binge: null, trigger: null });
+    setI(0);
+    setSent(null);
+    setScreen("checkin");
+  }
+
+  // ===== ultra-light self-checks (в консоль, без UI) =====
+  useEffect(function(){
+    try {
+      var t = [];
+      var a1 = pickPrimaryAdvice({ binge: true, urge: 0, carbs_ok: true });
+      t.push(["binge priority", !!a1 && a1.title.indexOf("эпизод") !== -1]);
+      var a2 = pickPrimaryAdvice({ binge: false, urge: 2, carbs_ok: true });
+      t.push(["urge≥2 second", !!a2 && a2.title.indexOf("Тяга") !== -1]);
+      var a3 = pickPrimaryAdvice({ binge: false, urge: 0, carbs_ok: false });
+      t.push(["carbs deficit third", !!a3 && a3.title.indexOf("Недобор") !== -1]);
+      var a4 = pickPrimaryAdvice({ binge: false, urge: 0, carbs_ok: true, water_ok: false });
+      t.push(["water lowest priority", !!a4 && a4.title.indexOf("Мало воды") !== -1]);
+      if (typeof console !== 'undefined') console.log("[self-checks]", t);
+    } catch(_){}
+  }, []);
+
+  return (
+    <div style={{ background: theme.bg, color: theme.text, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, -apple-system, Roboto, Helvetica, Arial" }}>
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: 16 }}>
+        <Header theme={theme} onOpenProtocol={function(){ setScreen("protocol"); }} onOpenFoods={function(){ setScreen("foods"); }} onNewCheckin={resetCheckin} />
+
+        {screen === "protocol" ? (
+          <ProtocolCard theme={theme} />
+        ) : screen === "foods" ? (
+          <FoodsCard theme={theme} />
+        ) : screen === "done" ? (
+          <DoneCard theme={theme} state={state} />
+        ) : (
+          <CheckinCard
+            theme={theme}
+            i={i}
+            step={step}
+            state={state}
+            setState={setState}
+            next={next}
+            back={back}
+            progress={progress}
+            handleSubmit={handleSubmit}
+          />
+        )}
+
+        {((typeof window !== 'undefined') && /(?:^|[?&])debug=1(?:&|$)/.test(((window.location && window.location.search) || '')) ) && sent && (
+          <pre style={{ marginTop: 16, padding: 12, background: theme.card, borderRadius: 12, whiteSpace: "pre-wrap", wordBreak: "break-word", border: '1px solid ' + theme.border }}>{sent}</pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ===== UI =====
+function Header(props){
+  var theme = props.theme, onOpenProtocol = props.onOpenProtocol, onOpenFoods = props.onOpenFoods, onNewCheckin = props.onNewCheckin;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+      <div style={{ width: 40, height: 40, borderRadius: 12, background: theme.card, display: "grid", placeItems: "center" }}>🛡️</div>
+      <div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>Антисрыв</div>
+        <div style={{ fontSize: 13, color: theme.subtext }}>Чек-ин 60 сек · без оценок</div>
+      </div>
+      <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: 'wrap' }}>
+        <button onClick={onOpenProtocol} style={{ fontSize: 13, padding: "8px 12px", borderRadius: 10, border: '1px solid ' + theme.border, background: theme.card }}>Стоп-протокол</button>
+        <button onClick={onOpenFoods} style={{ fontSize: 13, padding: "8px 12px", borderRadius: 10, border: '1px solid ' + theme.border, background: theme.card }}>Список продуктов</button>
+        <button onClick={onNewCheckin} style={btnPrimary(theme)}>Новый чек-ин</button>
+      </div>
+    </div>
+  );
+}
+
+function DoneCard(props){
+  var theme = props.theme, state = props.state;
+  var advice = pickPrimaryAdvice(state);
+  return (
+    <div style={{ marginBottom: 12, border: '1px solid ' + theme.border, background: '#fff', borderRadius: 12 }}>
+      <div style={{ padding: 10, borderBottom: '1px solid ' + theme.border, background: 'rgba(37,99,235,0.06)', borderTopLeftRadius: 12, borderTopRightRadius: 12 }}>
+        🎉 Чек-ин отправлен
+      </div>
+      <div style={{ padding: 12 }}>
+        {advice ? (
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>{advice.title}</div>
+            <ul style={{ paddingLeft: 18, margin: 0 }}>
+              {advice.items.map(function(t, idx){ return <li key={idx} style={{ fontSize: 14, color: theme.subtext }}>{t}</li>; })}
+            </ul>
+          </div>
+        ) : (
+          <div style={{ fontSize: 14, color: theme.subtext }}>Всё ок 👍 Ты молодец, похвали себя и прожай в том же духе!</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CheckinCard(props){
+  var theme = props.theme, i = props.i, step = props.step, state = props.state, setState = props.setState, next = props.next, back = props.back, progress = props.progress, handleSubmit = props.handleSubmit;
+  return (
+    <div style={{ background: theme.card, borderRadius: 16, padding: 16, border: '1px solid ' + theme.border }}>
+      <Progress value={progress} accent={theme.accent} />
+
+      {step === "carbs" && (
+        <Section title="Ты ела достаточно медленных углеводов и белка?" subtitle="За день в сумме — ориентируйся на чувство сытости и энергию">
+          <Row>
+            <ChoiceBtn active={state.carbs_ok === true} onClick={function(){ setState(Object.assign({}, state, { carbs_ok: true })); }}>Да ✅</ChoiceBtn>
+            <ChoiceBtn active={state.carbs_ok === false} onClick={function(){ setState(Object.assign({}, state, { carbs_ok: false })); }}>Недобор ⛔</ChoiceBtn>
+          </Row>
+        </Section>
+      )}
+
+      {step === "water" && (
+        <Section title="Пила достаточно воды сегодня?" subtitle="Ориентир: ~30 мл/кг массы тела в сутки (до 4 л), больше в жару/при активности">
+          <Row>
+            <ChoiceBtn active={state.water_ok === true} onClick={function(){ setState(Object.assign({}, state, { water_ok: true })); }}>Да 💧</ChoiceBtn>
+            <ChoiceBtn active={state.water_ok === false} onClick={function(){ setState(Object.assign({}, state, { water_ok: false })); }}>Недобор 💧</ChoiceBtn>
+          </Row>
+        </Section>
+      )}
+
+      {step === "mood" && (
+        <Section title="Настроение" subtitle="Как ты сейчас в целом?">
+          <Row>
+            <ChoiceBtn active={state.mood === "positive"} onClick={function(){ setState(Object.assign({}, state, { mood: "positive" })); }}>🙂 Хорошее</ChoiceBtn>
+            <ChoiceBtn active={state.mood === "neutral"} onClick={function(){ setState(Object.assign({}, state, { mood: "neutral" })); }}>😐 Нейтральное</ChoiceBtn>
+            <ChoiceBtn active={state.mood === "negative"} onClick={function(){ setState(Object.assign({}, state, { mood: "negative" })); }}>☁️ Сложное</ChoiceBtn>
+          </Row>
+        </Section>
+      )}
+
+      {step === "urge" && (
+        <Section title="Тяга к сладкому/ мучному/ фастфуду (0–3)" subtitle="0 — нет тяги, 3 — очень сильная">
+          <Row>
+            {[0,1,2,3].map(function(v){
+              return (
+                <ChoiceBtn key={v} active={state.urge === v} onClick={function(){ setState(Object.assign({}, state, { urge: v })); }}>{v}</ChoiceBtn>
+              );
+            })}
+          </Row>
+        </Section>
+      )}
+
+      {step === "binge" && (
+        <Section title="Эпизод переедания?" subtitle="Если да — двигаемся мягко, без наказаний">
+          <Row>
+            <ChoiceBtn active={state.binge === true} onClick={function(){ setState(Object.assign({}, state, { binge: true })); }}>Был</ChoiceBtn>
+            <ChoiceBtn active={state.binge === false} onClick={function(){ setState(Object.assign({}, state, { binge: false, trigger: null })); }}>Не было</ChoiceBtn>
+          </Row>
+
+          {state.binge === true && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Что послужило триггером? Что предшествовало срыву?</div>
+              <div style={{ fontSize: 13, color: theme.subtext, marginBottom: 8 }}>Подсказка: отмечай причины чаще — это поможет видеть закономерности и предугадывать срывы.</div>
+              <Row>
+                {["стресс","усталость","гаджет","привычка","скука","вечернее время","другое"].map(function(v){
+                  return (
+                    <ChoiceBtn key={v} active={state.trigger === v} onClick={function(){ setState(Object.assign({}, state, { trigger: v })); }}>{v}</ChoiceBtn>
+                  );
+                })}
+              </Row>
+            </div>
+          )}
+
+          <div style={{ marginTop: 8, fontSize: 13, color: theme.subtext }}>Все вопросы пройдены. Нажмите «Готово», чтобы завершить чек-ин.</div>
+        </Section>
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button onClick={back} disabled={i === 0} style={btnOutline(theme)}>Назад</button>
+        <button onClick={i === (steps.length - 1) ? handleSubmit : next} style={btnPrimary(theme)}>{i === (steps.length - 1) ? 'Готово' : 'Дальше'}</button>
+      </div>
+      <div style={{ fontSize: 12, color: theme.subtext, marginTop: 8 }}>Заполнение занимает ~60 секунд. Данные — только для личной поддержки.</div>
+    </div>
+  );
+}
+
+function FoodsTable(props){
+  var theme = props.theme, title = props.title, rows = props.rows;
+  return (
+    <div style={{ background:'#fff', border:'1px solid '+props.theme.border, borderRadius:12, overflow:'hidden' }}>
+      <div style={{ padding:'8px 12px', fontWeight:600, background:'rgba(0,0,0,0.03)' }}>{title}</div>
+      <table style={{ width:'100%', borderCollapse:'collapse' }}>
+        <tbody>
+          {rows.map(function(r, idx){ return (
             <tr key={idx}>
-              <td style={{verticalAlign:"top",padding:"8px 12px",borderTop:"1px solid "+theme.border,width:"34%",fontWeight:600}}>{r[0]}</td>
-              <td style={{verticalAlign:"top",padding:"8px 12px",borderTop:"1px solid "+theme.border}}>{r[1]}</td>
+              <td style={{ verticalAlign:'top', padding:'8px 12px', borderTop:'1px solid '+theme.border, width:'34%', fontWeight:600 }}>{r[0]}</td>
+              <td style={{ verticalAlign:'top', padding:'8px 12px', borderTop:'1px solid '+theme.border }}>{r[1]}</td>
             </tr>
           );})}
-        </tbody></table>
-      </div>);
-    }
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
-    function Header(props){
-      var theme=props.theme, onOpenProtocol=props.onOpenProtocol, onOpenFoods=props.onOpenFoods, onNewCheckin=props.onNewCheckin;
-      return (<div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
-        <div style={{width:40,height:40,borderRadius:12,background:theme.card,display:"grid",placeItems:"center"}}>🛡️</div>
+function FoodsCard(props){
+  var theme = props.theme;
+  function go(id){ try{ var el = document.getElementById(id); if (el && el.scrollIntoView) el.scrollIntoView({ behavior:'smooth', block:'start' }); } catch(_){} }
+  return (
+    <div style={{ background: props.theme.card, borderRadius: 16, padding: 16, border: '1px solid ' + props.theme.border }}>
+      <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 6 }}>Продукты для здоровья</div>
+      <div style={{ fontSize: 13, color: theme.subtext, marginBottom: 12 }}>Ориентир тарелки: 1/2 клетчатка · 1/4 белок · 1/4 сложные углеводы + полезные жиры.</div>
+
+      {/* Быстрые ссылки */}
+      <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:12 }}>
+        {[{id:'p-animal',label:'Белки'},{id:'carbs',label:'Углеводы'},{id:'fiber',label:'Клетчатка'},{id:'fats',label:'Полезные жиры'}].map(function(link){
+          return (
+            <button key={link.id} onClick={function(){ go(link.id); }} style={{ fontSize:13, padding:'6px 10px', borderRadius:999, border:'1px solid '+theme.border, background:'#fff', textDecoration:'underline', cursor:'pointer' }}>{link.label}</button>
+          );
+        })}
+      </div>
+
+      <div style={{ display:'grid', gap:12 }}>
+        <div id="p-animal">
+          <FoodsTable theme={theme} title="🍗 БЕЛОК (¼ тарелки)"
+            rows={[
+              ["Мясо/птица","говядина, курица, индейка, телятина, кролик, перепелка"],
+              ["Рыба","лосось, форель, тунец, треска, сардины, дорадо, сибас"],
+              ["Морепродукты","креветки, мидии, кальмары"],
+              ["Яйца","яйца куриные/перепелиные"],
+              ["Сыр","нежирный козий сыр (2–3 раза в неделю)"]
+            ]}
+          />
+        </div>
+
+        <div id="p-plant">
+          <FoodsTable theme={theme} title="🌱 Растительный белок"
+            rows={[
+              ["Бобовые","чечевица, нут, маш, фасоль, горох"],
+              ["Псевдозерновые","киноа, амарант, гречка"],
+              ["Орехи и семечки","миндаль, кешью, тыквенные семечки, чиа"],
+              ["Грибы","шампиньоны, вешенки"],
+              ["Соевые продукты","тофу, соевое молоко"]
+            ]}
+          />
+        </div>
+
+        <div id="carbs">
+          <FoodsTable theme={theme} title="🍚 УГЛЕВОДЫ (¼ тарелки) — сложные"
+            rows={[
+              ["Крупы","овсянка, гречка, бурый и дикий рис, перловка, киноа, пшено"],
+              ["Хлеб/паста","цельнозерновые хлебцы/лаваш, паста из твёрдых сортов"],
+              ["Бобовые","фасоль, чечевица, горох, маш, нут"],
+              ["Крахмалистые овощи","картофель, батат, тыква"]
+            ]}
+          />
+        </div>
+
+        <div id="fiber">
+          <div style={{ fontWeight:700, fontSize:16 }}>🥦 КЛЕТЧАТКА (½ тарелки)</div>
+          <div style={{ fontSize:13, color:theme.subtext }}>Клетчатка очень важна‼️ Помогает кишечнику, снижает уровень глюкозы и даёт насыщение.</div>
+
+          <FoodsTable theme={theme} title="Овощи"
+            rows={[
+              ["Капусты","брокколи, цветная, белокочанная, брюссельская"],
+              ["Корнеплоды и др.","морковь, свёкла, кабачок, тыква, батат, сельдерей"],
+              ["Овощи с меньшей клетчаткой","редис, огурец, помидор, перец"]
+            ]}
+          />
+
+          <FoodsTable theme={theme} title="Зелень и салаты"
+            rows={[["Примеры","петрушка, укроп, кинза, зелёный лук, листья салата, руккола, шпинат, щавель, базилик, мангольд, кейл"]]}
+          />
+
+          <FoodsTable theme={theme} title="Фрукты и ягоды"
+            rows={[
+              ["Больше клетчатки","яблоки с кожурой, груши с кожурой, персики, инжир, хурма, айва, киви"],
+              ["Среднее количество","апельсин, мандарин, грейпфрут, банан, нектарин, персик, слива, абрикос, гранат"],
+              ["Меньше клетчатки","ананас, арбуз, дыня, манго, папайя"],
+              ["Ягоды","малина, черника, клюква, ежевика, клубника, голубика, смородина"]
+            ]}
+          />
+
+          <FoodsTable theme={theme} title="Бобовые и цельнозерновые (как источник клетчатки)"
+            rows={[
+              ["Бобовые","чечевица, нут, фасоль"],
+              ["Цельнозерновые","овсянка, гречка, киноа, пшено, бурый рис, отруби, цельнозерновые хлебцы, семена льна и чиа, псиллиум"]
+            ]}
+          />
+        </div>
+
+        <div id="fats">
+          <FoodsTable theme={theme} title="🫒 ПОЛЕЗНЫЕ ЖИРЫ"
+            rows={[
+              ["Рыба","лосось, форель, скумбрия, сардины"],
+              ["Масла","оливковое, льняное, кокосовое, кунжутное, тыквенное, из виноградной косточки, авокадо и другие сыродавленные"],
+              ["Орехи","грецкие, миндаль, кешью"],
+              ["Семена","лён, кунжут, чиа"],
+              ["Другое","масло ГХИ, авокадо, оливки"]
+            ]}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+function ProtocolCard(props){
+  var theme = props.theme;
+  return (
+    <div style={{ background: theme.card, borderRadius: 16, padding: 16, border: '1px solid ' + theme.border }}>
+      <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 6 }}>Стоп-протокол</div>
+      <div style={{ fontSize: 13, color: theme.subtext, marginBottom: 12 }}>Если тяга к сладкому / вредному высокая, используй следующие подсказки:</div>
+
+      <div style={{ display: 'grid', gap: 12 }}>
         <div>
-          <div style={{fontSize:18,fontWeight:700}}>Антисрыв</div>
-          <div style={{fontSize:13,color:theme.subtext}}>Чек-ин 60 сек · без оценок</div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Шаг 1. Стоп ✋</div>
+          <ul style={{ paddingLeft: 18, margin: 0 }}>
+            <li>Сделай паузу 3–5 минут.</li>
+            <li>Спроси себя: «Я действительно хочу это съесть или на самом деле телу сейчас нужно что-то другое (отдых, развлечение, перерыв)?».</li>
+          </ul>
         </div>
-        <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button onClick={onOpenProtocol} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card}}>Стоп-протокол</button>
-          <button onClick={onOpenFoods} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card,textDecoration:"underline",cursor:"pointer"}}>Список продуктов</button>
-          <button onClick={onNewCheckin} style={btnPrimary(theme)}>Новый чек-ин</button>
+
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Шаг 2. Проверка ⚖️</div>
+          <ul style={{ paddingLeft: 18, margin: 0 }}>
+            <li>Прошло ли 3 часа с последнего приема пищи? Если да → поешь.</li></ul>
         </div>
-      </div>);
-    }
 
-    function DoneCard(props){
-      var theme=props.theme, state=props.state;
-      var advice=pickPrimaryAdvice(state);
-      return (<div style={{marginBottom:12,border:"1px solid "+theme.border,background:"#fff",borderRadius:12}}>
-        <div style={{padding:10,borderBottom:"1px solid "+theme.border,background:"rgba(37,99,235,0.06)",borderTopLeftRadius:12,borderTopRightRadius:12}}>🎉 Чек-ин отправлен</div>
-        <div style={{padding:12}}>
-          {advice? (<div>
-            <div style={{fontWeight:600,marginBottom:4}}>{advice.title}</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              {advice.items.map(function(t,idx){return <li key={idx} style={{fontSize:14,color:theme.subtext}}>{t}</li>;})}
-            </ul>
-          </div>) : (<div style={{fontSize:14,color:theme.subtext}}>Всё ок 👍 Ты молодец, похвали себя и продолжай в том же духе!</div>)}
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Шаг 3. Альтернатива 🔄</div>
+          <div style={{ fontSize: 14, color: theme.text, marginBottom: 6 }}>Если голод эмоциональный → замени действием:</div>
+          <ul style={{ paddingLeft: 18, margin: 0 }}>
+            <li>💧 стакан воды</li>
+            <li>🚶‍♀️ прогулка 5-10 минут</li>
+            <li>🧘‍♀️ дыхание 4-7-8: вдох на 4 счета, задержка на 7, выдох на 8</li>
+            <li>🎶 музыка, душ, звонок подруге или просто полежать 15 минут</li>
+          </ul>
         </div>
-      </div>);
-    }
 
-    function ProtocolCard(props){
-      var theme=props.theme;
-      return (<div style={{background:theme.card,borderRadius:16,padding:16,border:"1px solid "+theme.border}}>
-        <div style={{fontWeight:700,fontSize:18,marginBottom:6}}>Стоп-протокол</div>
-        <div style={{fontSize:13,color:theme.subtext,marginBottom:12}}>Если тяга к сладкому / вредному высокая, используй следующие подсказки:</div>
-        <div style={{display:"grid",gap:12}}>
-          <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 1. Стоп ✋</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>Сделай паузу 3–5 минут.</li>
-              <li>Спроси себя: «Я действительно хочу это съесть или на самом деле телу сейчас нужно что-то другое (отдых, развлечение, перерыв)?».</li>
-            </ul>
-          </div>
-          <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 2. Проверка ⚖️</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>Прошло ли 3 часа с последнего приема пищи? Если да → поешь.</li>
-            </ul>
-          </div>
-          <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 3. Альтернатива 🔄</div>
-            <div style={{fontSize:14,color:theme.text,marginBottom:6}}>Если голод эмоциональный → замени действием:</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>💧 стакан воды</li>
-              <li>🚶‍♀️ прогулка 5–10 минут</li>
-              <li>🧘‍♀️ дыхание 4–7–8: вдох на 4 счета, задержка на 7, выдох на 8</li>
-              <li>🎶 музыка, душ, звонок подруге или просто полежать 15 минут</li>
-            </ul>
-          </div>
-          <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 4. Осознанный выбор 🍏</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>Скажи себе: «Я кормлю тело для восстановления и здоровья, а не заедаю эмоции».</li>
-              <li>Собери тарелку из овощей/салата, медленных углеводов, белков и жиров.</li>
-              <li>Ешь медленно, наслаждаясь вкусом.</li>
-              <li>Если тяга к сладкому не ушла → разреши себе маленькую порцию, но с тарелки, без еды «на автомате». Выбирай сухофрукты или натуральную пастилу.</li>
-            </ul>
-          </div>
-          <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 5. Разбор ✍️</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>Спроси себя: «Что на самом деле я хотела закрыть? Усталость? Напряжение? Желание отдохнуть?» Отмечай, в каких ситуациях тяга особенно сильная.</li>
-            </ul>
-          </div>
-          <div style={{marginTop:4,padding:10,border:"1px dashed "+theme.border,borderRadius:12,background:"#fff"}}>
-            Совет: подготовь заранее «Список удовольствий» — простых действий на 5–20 минут, который ты сможешь использовать, когда чувствуешь эмоциональный голод.
-          </div>
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Шаг 4. Осознанный выбор 🍏</div>
+          <ul style={{ paddingLeft: 18, margin: 0 }}>
+            <li>- Скажи себе: «Я кормлю тело для восстановления и здоровья, а не заедаю эмоции».</li>
+            <li>- Собери тарелку из овощей/салата, медленных углеводов, белков и жиров.</li>
+            <li>- Ешь медленно, наслаждаясь вкусом.</li>
+            <li>Если тяга к сладкому не ушла → разреши себе маленькую порцию, но с тарелки, без еды «на автомате». Выбирай сухофрукты или натуральную пастилу в качестве десерта.</li>
+          </ul>
         </div>
-      </div>);
-    }
 
-    function FoodsCard(props){
-      var theme=props.theme;
-      function go(id){ try{ var el=document.getElementById(id); if(el&&el.scrollIntoView) el.scrollIntoView({behavior:"smooth",block:"start"});}catch(_){} }
-      return (<div style={{background:props.theme.card,borderRadius:16,padding:16,border:"1px solid "+props.theme.border}}>
-        <div style={{fontWeight:700,fontSize:18,marginBottom:6}}>Продукты для здоровья</div>
-        <div style={{fontSize:13,color:theme.subtext,marginBottom:12}}>Ориентир тарелки: 1/2 клетчатка · 1/4 белок · 1/4 сложные углеводы + полезные жиры.</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
-          {[{id:"p-animal",label:"Белки"},{id:"carbs",label:"Углеводы"},{id:"fiber",label:"Клетчатка"},{id:"fats",label:"Полезные жиры"}].map(function(link){
-            return (<button key={link.id} onClick={function(){go(link.id);}} style={{fontSize:13,padding:"6px 10px",borderRadius:999,border:"1px solid #e5e7eb",background:"#fff",textDecoration:"underline",cursor:"pointer"}}>{link.label}</button>);
-          })}
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Шаг 5. Разбор ✍️</div>
+          <ul style={{ paddingLeft: 18, margin: 0 }}>
+            <li>Спроси себя: «Что на самом деле я хотела закрыть? Усталость? Напряжение? Желание отдохнуть?» Отмечай, в каких ситуациях тяга особенно сильная.</li>
+          </ul>
         </div>
-        <div style={{display:"grid",gap:12}}>
-          <div id="p-animal">
-            <FoodsTable theme={theme} title="🍗 БЕЛОК (¼ тарелки)"
-              rows={[
-                ["Мясо/птица","говядина, курица, индейка, телятина, кролик, перепелка"],
-                ["Рыба","лосось, форель, тунец, треска, сардины, дорадо, сибас"],
-                ["Морепродукты","креветки, мидии, кальмары"],
-                ["Яйца","яйца куриные/перепелиные"],
-                ["Сыр","нежирный козий сыр (2–3 раза в неделю)"]
-              ]}
-            />
-          </div>
-          <div id="p-plant">
-            <FoodsTable theme={theme} title="🌱 Растительный белок"
-              rows={[
-                ["Бобовые","чечевица, нут, маш, фасоль, горох"],
-                ["Псевдозерновые","киноа, амарант, гречка"],
-                ["Орехи и семечки","миндаль, кешью, тыквенные семечки, чиа"],
-                ["Грибы","шампиньоны, вешенки"],
-                ["Соевые продукты","тофу, соевое молоко"]
-              ]}
-            />
-          </div>
-          <div id="carbs">
-            <FoodsTable theme={theme} title="🍚 УГЛЕВОДЫ (¼ тарелки) — сложные"
-              rows={[
-                ["Крупы","овсянка, гречка, бурый и дикий рис, перловка, киноа, пшено"],
-                ["Хлеб/паста","цельнозерновые хлебцы/лаваш, паста из твёрдых сортов"],
-                ["Бобовые","фасоль, чечевица, горох, маш, нут"],
-                ["Крахмалистые овощи","картофель, батат, тыква"]
-              ]}
-            />
-          </div>
-          <div id="fiber">
-            <div style={{fontWeight:700,fontSize:16}}>🥦 КЛЕТЧАТКА (½ тарелки)</div>
-            <div style={{fontSize:13,color:theme.subtext}}>Клетчатка очень важна‼️ Помогает кишечнику, снижает уровень глюкозы и даёт насыщение.</div>
-            <FoodsTable theme={theme} title="Овощи"
-              rows={[
-                ["Капусты","брокколи, цветная, белокочанная, брюссельская"],
-                ["Корнеплоды и др.","морковь, свёкла, кабачок, тыква, батат, сельдерей"],
-                ["Овощи с меньшей клетчаткой","редис, огурец, помидор, перец"]
-              ]}
-            />
-            <FoodsTable theme={theme} title="Зелень и салаты"
-              rows={[[ "Примеры","петрушка, укроп, кинза, зелёный лук, листья салата, руккола, шпинат, щавель, базилик, мангольд, кейл"]]}
-            />
-            <FoodsTable theme={theme} title="Фрукты и ягоды"
-              rows={[
-                ["Больше клетчатки","яблоки с кожурой, груши с кожурой, персики, инжир, хурма, айва, киви"],
-                ["Среднее количество","апельсин, мандарин, грейпфрут, банан, нектарин, персик, слива, абрикос, гранат"],
-                ["Меньше клетчатки","ананас, арбуз, дыня, манго, папайя"],
-                ["Ягоды","малина, черника, клюква, ежевика, клубника, голубика, смородина"]
-              ]}
-            />
-            <FoodsTable theme={theme} title="Бобовые и цельнозерновые (как источник клетчатки)"
-              rows={[
-                ["Бобовые","чечевица, нут, фасоль"],
-                ["Цельнозерновые","овсянка, гречка, киноа, пшено, бурый рис, отруби, цельнозерновые хлебцы, семена льна и чиа, псиллиум"]
-              ]}
-            />
-          </div>
-          <div id="fats">
-            <FoodsTable theme={theme} title="🫒 ПОЛЕЗНЫЕ ЖИРЫ"
-              rows={[
-                ["Рыба","лосось, форель, скумбрия, сардины"],
-                ["Масла","оливковое, льняное, кокосовое, кунжутное, тыквенное, из виноградной косточки, авокадо и другие сыродавленные"],
-                ["Орехи","грецкие, миндаль, кешью"],
-                ["Семена","лён, кунжут, чиа"],
-                ["Другое","масло ГХИ, авокадо, оливки"]
-              ]}
-            />
-          </div>
+
+        <div style={{ marginTop: 4, padding: 10, border: '1px dashed ' + theme.border, borderRadius: 12, background: '#fff' }}>
+          Совет: подготовь заранее «Список удовольствий» - простых действий на 5-20 минут, который ты сможешь использовать, когда чувствуешь эмоциональный голод.
         </div>
-      </div>);
-    }
+      </div>
+    </div>
+  );
+}
 
-    function CheckinCard(props){
-      var theme=props.theme, i=props.i, step=props.step, state=props.state, setState=props.setState, next=props.next, back=props.back, progress=props.progress, handleSubmit=props.handleSubmit;
-      return (<div style={{background:theme.card,borderRadius:16,padding:16,border:"1px solid "+theme.border}}>
-        <Progress value={progress} accent={theme.accent} />
-        {step==="carbs" && (<Section title="Ты ела достаточно медленных углеводов и белка?" subtitle="За день в сумме — ориентируйся на чувство сытости и энергию">
-          <Row>
-            <ChoiceBtn active={state.carbs_ok===true} onClick={function(){setState(Object.assign({},state,{carbs_ok:true}));}}>Да ✅</ChoiceBtn>
-            <ChoiceBtn active={state.carbs_ok===false} onClick={function(){setState(Object.assign({},state,{carbs_ok:false}));}}>Недобор ⛔</ChoiceBtn>
-          </Row>
-        </Section>)}
-        {step==="water" && (<Section title="Пила достаточно воды сегодня?" subtitle="Ориентир: ~30 мл/кг массы тела в сутки (до 4 л), больше в жару/при активности">
-          <Row>
-            <ChoiceBtn active={state.water_ok===true} onClick={function(){setState(Object.assign({},state,{water_ok:true}));}}>Да 💧</ChoiceBtn>
-            <ChoiceBtn active={state.water_ok===false} onClick={function(){setState(Object.assign({},state,{water_ok:false}));}}>Недобор 💧</ChoiceBtn>
-          </Row>
-        </Section>)}
-        {step==="mood" && (<Section title="Настроение" subtitle="Как ты сейчас в целом?">
-          <Row>
-            <ChoiceBtn active={state.mood==="positive"} onClick={function(){setState(Object.assign({},state,{mood:"positive"}));}}>🙂 Хорошее</ChoiceBtn>
-            <ChoiceBtn active={state.mood==="neutral"} onClick={function(){setState(Object.assign({},state,{mood:"neutral"}));}}>😐 Нейтральное</ChoiceBtn>
-            <ChoiceBtn active={state.mood==="negative"} onClick={function(){setState(Object.assign({},state,{mood:"negative"}));}}>☁️ Сложное</ChoiceBtn>
-          </Row>
-        </Section>)}
-        {step==="urge" && (<Section title="Тяга к сладкому/ мучному/ фастфуду (0–3)" subtitle="0 — нет тяги, 3 — очень сильная">
-          <Row>
-            {[0,1,2,3].map(function(v){return (<ChoiceBtn key={v} active={state.urge===v} onClick={function(){setState(Object.assign({},state,{urge:v}));}}>{v}</ChoiceBtn>);})}
-          </Row>
-        </Section>)}
-        {step==="binge" && (<Section title="Эпизод переедания?" subtitle="Если да — двигаемся мягко, без наказаний">
-          <Row>
-            <ChoiceBtn active={state.binge===true} onClick={function(){setState(Object.assign({},state,{binge:true}));}}>Был</ChoiceBtn>
-            <ChoiceBtn active={state.binge===false} onClick={function(){setState(Object.assign({},state,{binge:false,trigger:null}));}}>Не было</ChoiceBtn>
-          </Row>
-          {state.binge===true && (<div style={{marginTop:10}}>
-            <div style={{fontWeight:600,marginBottom:6}}>Что послужило триггером? Что предшествовало срыву?</div>
-            <div style={{fontSize:13,color:theme.subtext,marginBottom:8}}>Подсказка: отмечай причины чаще — это поможет видеть закономерности и предугадывать срывы.</div>
-            <Row>
-              {["стресс","усталость","гаджет","привычка","скука","вечернее время","другое"].map(function(v){
-                return (<ChoiceBtn key={v} active={state.trigger===v} onClick={function(){setState(Object.assign({},state,{trigger:v}));}}>{v}</ChoiceBtn>);
-              })}
-            </Row>
-          </div>)}
-          <div style={{marginTop:8,fontSize:13,color:theme.subtext}}>Все вопросы пройдены. Нажмите «Готово», чтобы завершить чек-ин.</div>
-        </Section>)}
-        <div style={{display:"flex",gap:8,marginTop:8}}>
-          <button onClick={back} disabled={i===0} style={btnOutline(theme)}>Назад</button>
-          <button onClick={i===(steps.length-1)?handleSubmit:next} style={btnPrimary(theme)}>{i===(steps.length-1)?'Готово':'Дальше'}</button>
-        </div>
-        <div style={{fontSize:12,color:theme.subtext,marginTop:8}}>Заполнение занимает ~60 секунд. Данные — только для личной поддержки.</div>
-      </div>);
-    }
+function Progress(props){
+  var value = props.value, accent = props.accent;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ height: 8, width: "100%", background: "rgba(0,0,0,0.08)", borderRadius: 999 }}>
+        <div style={{ height: 8, width: value + '%', background: accent, borderRadius: 999, transition: 'width .25s ease' }} />
+      </div>
+      <div style={{ fontSize: 12, marginTop: 6, opacity: 0.75 }}>{value}%</div>
+    </div>
+  );
+}
 
-    function App(){
-      const tg = useTelegram();
-      const theme = useTheme(tg);
-      const [screen,setScreen] = useState("checkin"); // 'checkin' | 'protocol' | 'done' | 'foods'
-      const [i,setI] = useState(0);
-      const [state,setState] = useState({carbs_ok:null,water_ok:null,mood:null,urge:null,binge:null,trigger:null});
-      const [sent,setSent] = useState(null);
+function Section(props){
+  var title = props.title, subtitle = props.subtitle, children = props.children;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{title}</div>
+      {subtitle && <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 8 }}>{subtitle}</div>}
+      {children}
+    </div>
+  );
+}
 
-      useEffect(function(){
-        if (typeof window==="undefined") return;
-        var q = new URLSearchParams((window.location&&window.location.search)||"");
-        if(((q.get("screen")||"").toLowerCase())==="protocol") setScreen("protocol");
-      },[]);
-      useEffect(function(){
-        if(!tg) return;
-        if(tg.ready) tg.ready();
-        if(tg.expand) tg.expand();
-        if(tg.MainButton && tg.MainButton.setParams) tg.MainButton.setParams({text: screen==="checkin" ? "Отправить" : "Закрыть"});
-        if(tg.MainButton && tg.MainButton.show) tg.MainButton.show();
-        var onMain = function(){ if(screen==="checkin") handleSubmit(); else if(tg.close) tg.close(); };
-        if(tg.onEvent) tg.onEvent("mainButtonClicked", onMain);
-        return function(){ if(tg.offEvent) tg.offEvent("mainButtonClicked", onMain); };
-      },[tg,screen,state]);
+function Row(props){
+  return <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>{props.children}</div>;
+}
 
-      var step = steps[i];
-      var progress = Math.round((i/steps.length)*100);
+function ChoiceBtn(props){
+  var active = props.active, onClick = props.onClick, children = props.children;
+  return (
+    <button onClick={onClick} style={{ padding: '14px 12px', borderRadius: 12, border: '1px solid ' + (active ? 'transparent' : '#e5e7eb'), background: active ? 'rgba(37,99,235,0.12)' : '#fff', fontWeight: 600 }}>{children}</button>
+  );
+}
 
-      function next(){ setI(function(p){return Math.min(p+1,steps.length-1);}); var hf=get(tg,["HapticFeedback","impactOccurred"],null); if(hf) hf("light"); }
-      function back(){ setI(function(p){return Math.max(p-1,0);}); }
-
-      function handleSubmit(){
-        if(i < steps.length-1) return;
-        var userId = get(tg,["initDataUnsafe","user","id"],null);
-        var payload = { type:"checkin", ts:Math.floor(Date.now()/1000), user_id:userId,
-          carbs_ok:state.carbs_ok, water_ok:state.water_ok, mood:state.mood, urge:state.urge, binge:state.binge, trigger:state.trigger };
-        var json = JSON.stringify(payload);
-        var send = get(tg,["sendData"],null);
-        if(send){ send(json); setSent(json); var note=get(tg,["HapticFeedback","notificationOccurred"],null); if(note) note("success"); }
-        else { setSent(json); try{console.info("Check-in JSON", json);}catch(_){} }
-        setScreen("done");
-        try{ if(typeof window!=="undefined" && window.scrollTo) window.scrollTo({top:0,behavior:"smooth"});}catch(_){}
-      }
-
-      function resetCheckin(){ setState({carbs_ok:null,water_ok:null,mood:null,urge:null,binge:null,trigger:null}); setI(0); setSent(null); setScreen("checkin"); }
-
-      useEffect(function(){
-        try{
-          var t=[]; var a1=pickPrimaryAdvice({binge:true,urge:0,carbs_ok:true}); t.push(["binge priority", !!a1&&a1.title.indexOf("эпизод")!==-1]);
-          var a2=pickPrimaryAdvice({binge:false,urge:2,carbs_ok:true}); t.push(["urge≥2 second", !!a2&&a2.title.indexOf("Тяга")!==-1]);
-          var a3=pickPrimaryAdvice({binge:false,urge:0,carbs_ok:false}); t.push(["carbs deficit third", !!a3&&a3.title.indexOf("Недобор")!==-1]);
-          var a4=pickPrimaryAdvice({binge:false,urge:0,carbs_ok:true,water_ok:false}); t.push(["water lowest priority", !!a4&&a4.title.indexOf("Мало воды")!==-1]);
-          if(typeof console!=="undefined") console.log("[self-checks]", t);
-        }catch(_){}
-      },[]);
-
-      return (<div style={{background:theme.bg,color:theme.text,minHeight:"100vh"}}>
-        <div style={{maxWidth:560,margin:"0 auto",padding:16}}>
-          <Header theme={theme} onOpenProtocol={function(){setScreen("protocol");}} onOpenFoods={function(){setScreen("foods");}} onNewCheckin={resetCheckin} />
-          {screen==="protocol" ? (<ProtocolCard theme={theme} />)
-           : screen==="foods" ? (<FoodsCard theme={theme} />)
-           : screen==="done" ? (<DoneCard theme={theme} state={state} />)
-           : (<CheckinCard theme={theme} i={i} step={step} state={state} setState={setState} next={next} back={back} progress={progress} handleSubmit={handleSubmit} />)}
-          {sent && (<pre style={{marginTop:16,padding:12,background:theme.card,borderRadius:12,whiteSpace:"pre-wrap",wordBreak:"break-word",border:"1px solid "+theme.border}}>{sent}</pre>)}
-        </div>
-      </div>);
-    }
-
-    const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<App />);
-  </script>
-</body>
-</html>
+function btnPrimary(theme){ return { padding: '12px 14px', borderRadius: 12, background: theme.accent, color: '#fff', border: 'none', fontWeight: 700 }; }
+function btnOutline(theme){ return { padding: '12px 14px', borderRadius: 12, background: '#fff', color: theme.text, border: '1px solid ' + theme.border, fontWeight: 600 }; }
