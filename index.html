@@ -144,8 +144,8 @@
         </div>
         <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
           <button onClick={onOpenProtocol} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card}}>Стоп-протокол</button>
-          <button onClick={onOpenFoods} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card,textDecoration:"underline",cursor:"pointer"}}>Список продуктов</button>
-          <button onClick={onNewCheckin} style={btnPrimary(theme)}>Новый чек-ин</button>
+          <button onClick={onOpenFoods} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card,cursor:"pointer"}}>Список продуктов</button>
+          <button onClick={onNewCheckin} style={btnPrimary(theme)}>Чек-ин</button>
         </div>
       </div>);
     }
@@ -364,7 +364,6 @@
       const [state,setState] = useState({carbs_ok:null,water_ok:null,mood:null,urge:null,binge:null,trigger:null});
       const [sent,setSent] = useState(null);
       const debug = (typeof window !== "undefined") && /(?:^|[?&])debug=1(?:&|$)/.test((window.location && window.location.search) || "");
-
 
       useEffect(function(){
         if (typeof window==="undefined") return;
