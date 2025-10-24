@@ -51,29 +51,37 @@
     const INTERNAL_USER_NAME = __QP.get('uname') || '';
     const SESSION_ID = (crypto && crypto.randomUUID ? crypto.randomUUID() : (Date.now()+Math.random().toString(16).slice(2)));
     async function sendAnalytics(payload){
-  if(!ANALYTICS_ENABLED){ /* логи оставьте как есть */ return { ok:false }; }
+  if(!ANALYTICS_ENABLED){
+    if(DEBUG) console.warn('[analytics] ANALYTICS_URL not set or invalid. Skipping.', ANALYTICS_URL);
+    window.__analyticsState = { ok:false, lastError:'ANALYTICS_URL not set', lastResponse:null };
+    return { ok:false };
+  }
   try {
+    // no-cors: браузер отправит запрос, но ответ будет "opaque" (не читаем).
     const res = await fetch(ANALYTICS_URL, {
       method: 'POST',
-      // ВАЖНО: простой запрос -> без кастомных заголовков и без application/json
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-      // mode: 'cors' по умолчанию; no-cors можно, но тогда ответ будет opaque
+      mode: 'no-cors', // <-- ключ к обходу CORS
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // "simple" заголовок
+      body: JSON.stringify(payload)
     });
 
-    // Ответ может быть opaque в некоторых вебвью: просто считаем, что ок
-    let data = null;
-    try { data = await res.json(); } catch(_) {}
-    const ok = res.type === 'opaque' ? true : !!(res.ok && data && (data.ok === true || data.inserted >= 0));
-    window.__analyticsState = { ok, lastError: ok? null : ('HTTP '+res.status+' '+res.statusText), lastResponse: data };
-    return { ok, data };
+    // В режиме no-cors res.ok/res.status бесполезны; считаем "успехом".
+    window.__analyticsState = { ok:true, lastError:null, lastResponse:null };
+    if(DEBUG) console.log('[analytics] sent (no-cors opaque)', { payload });
+    return { ok:true };
   } catch (e) {
-    // мягкий фолбэк
+    // Фолбэк: sendBeacon
     try {
       const blob = new Blob([JSON.stringify(payload)], { type: 'text/plain;charset=utf-8' });
-      if (navigator.sendBeacon) navigator.sendBeacon(ANALYTICS_URL, blob);
+      if (navigator.sendBeacon) {
+        const ok = navigator.sendBeacon(ANALYTICS_URL, blob);
+        window.__analyticsState = { ok, lastError: ok? null : 'sendBeacon failed', lastResponse:null };
+        if(DEBUG) console.log('[analytics] sendBeacon', ok);
+        return { ok };
+      }
     } catch(_) {}
     window.__analyticsState = { ok:false, lastError:String(e), lastResponse:null };
+    if(DEBUG) console.error('[analytics] failed', e);
     return { ok:false, error:e };
   }
 }
