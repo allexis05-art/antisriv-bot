@@ -83,10 +83,18 @@
       }
     }
 
-    async function logEvent(event, data={}){
-      const body = { event, ts_client:new Date().toISOString(), app_version:APP_VERSION, session_id: SESSION_ID, user_id: INTERNAL_USER_ID, user_name: INTERNAL_USER_NAME, ...data };
+    async function logEvent(event, data = {}) {
+      const body = {
+        event,
+        ts_client: new Date().toISOString(),
+        app_version: APP_VERSION,
+        session_id: SESSION_ID,
+        user_id: INTERNAL_USER_ID,
+        user_name: INTERNAL_USER_NAME,
+        ...data
+      };
       return sendAnalytics(body);
-    }; return sendAnalytics(body); }
+    }
 
     function get(o, path, d){
       try{ let cur=o; for(let i=0;i<path.length;i++){ if(cur==null) return d; cur=cur[path[i]]; } return (cur===undefined?d:cur); }catch(e){ return d; }
