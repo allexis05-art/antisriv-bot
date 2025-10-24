@@ -45,47 +45,47 @@
     // ===== Utils =====
     // --- Analytics: Google Apps Script collector ---
     const ANALYTICS_URL = 'https://script.google.com/macros/s/AKfycbyCtENb1M8bsnRa4hGs3BS0MGMd3iGchp_bvY_NQv8aHJyLWuWcZGUpfAmPZrd_jIqZ1Q/exec?key=Dvhjhlkjf2033';
+    const ANALYTICS_ENABLED = /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(ANALYTICS_URL); // e.g. https://script.google.com/.../exec?key=XXXX
     const APP_VERSION = '1.0.0';
     const __QP = new URLSearchParams(location.search);
     const INTERNAL_USER_ID = __QP.get('uid') || '';
     const INTERNAL_USER_NAME = __QP.get('uname') || '';
+    const DEBUG = __QP.get('debug') === '1';
     const SESSION_ID = (crypto && crypto.randomUUID ? crypto.randomUUID() : (Date.now()+Math.random().toString(16).slice(2)));
-    async function sendAnalytics(payload){
-  if(!ANALYTICS_ENABLED){
-    if(DEBUG) console.warn('[analytics] ANALYTICS_URL not set or invalid. Skipping.', ANALYTICS_URL);
-    window.__analyticsState = { ok:false, lastError:'ANALYTICS_URL not set', lastResponse:null };
-    return { ok:false };
-  }
-  try {
-    // no-cors: браузер отправит запрос, но ответ будет "opaque" (не читаем).
-    const res = await fetch(ANALYTICS_URL, {
-      method: 'POST',
-      mode: 'no-cors', // <-- ключ к обходу CORS
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // "simple" заголовок
-      body: JSON.stringify(payload)
-    });
+    const ANALYTICS_ENABLED = /^https:\/\/script\.google\.com\/macros\/s\//.test(ANALYTICS_URL);
 
-    // В режиме no-cors res.ok/res.status бесполезны; считаем "успехом".
-    window.__analyticsState = { ok:true, lastError:null, lastResponse:null };
-    if(DEBUG) console.log('[analytics] sent (no-cors opaque)', { payload });
-    return { ok:true };
-  } catch (e) {
-    // Фолбэк: sendBeacon
-    try {
-      const blob = new Blob([JSON.stringify(payload)], { type: 'text/plain;charset=utf-8' });
-      if (navigator.sendBeacon) {
-        const ok = navigator.sendBeacon(ANALYTICS_URL, blob);
-        window.__analyticsState = { ok, lastError: ok? null : 'sendBeacon failed', lastResponse:null };
-        if(DEBUG) console.log('[analytics] sendBeacon', ok);
-        return { ok };
+    // хранение последнего статуса (для консольной отладки)
+    window.__analyticsState = { ok: null, lastError: null, lastResponse: null };
+
+    async function sendAnalytics(payload){
+      try {
+        const res = await fetch(ANALYTICS_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        });
+        window.__analyticsState = { ok:true, lastError:null, lastResponse:null };
+        if(DEBUG) console.log('[analytics] sent (no-cors opaque)', { payload });
+        return { ok:true };
+      } catch (e) {
+        try {
+          const blob = new Blob([JSON.stringify(payload)], { type: 'text/plain;charset=utf-8' });
+          const ok = navigator.sendBeacon ? navigator.sendBeacon(ANALYTICS_URL, blob) : false;
+          window.__analyticsState = { ok, lastError: ok? null : 'sendBeacon failed', lastResponse:null };
+          if(DEBUG) console.log('[analytics] sendBeacon', ok);
+          return { ok };
+        } catch(_) {}
+        window.__analyticsState = { ok:false, lastError:String(e), lastResponse:null };
+        if(DEBUG) console.error('[analytics] failed', e);
+        return { ok:false, error:e };
       }
-    } catch(_) {}
-    window.__analyticsState = { ok:false, lastError:String(e), lastResponse:null };
-    if(DEBUG) console.error('[analytics] failed', e);
-    return { ok:false, error:e };
-  }
-}
-    async function logEvent(event, data={}){ const body={event, ts_client:new Date().toISOString(), app_version:APP_VERSION, session_id: SESSION_ID, user_id: INTERNAL_USER_ID, user_name: INTERNAL_USER_NAME, ...data}; return sendAnalytics(body); }
+    }
+
+    async function logEvent(event, data={}){
+      const body = { event, ts_client:new Date().toISOString(), app_version:APP_VERSION, session_id: SESSION_ID, user_id: INTERNAL_USER_ID, user_name: INTERNAL_USER_NAME, ...data };
+      return sendAnalytics(body);
+    }; return sendAnalytics(body); }
 
     function get(o, path, d){
       try{ let cur=o; for(let i=0;i<path.length;i++){ if(cur==null) return d; cur=cur[path[i]]; } return (cur===undefined?d:cur); }catch(e){ return d; }
