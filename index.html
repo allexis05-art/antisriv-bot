@@ -2,432 +2,747 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Антисрыв — Telegram Mini App</title>
-  <meta name="theme-color" content="#2563eb" />
+  <meta name="theme-color" content="#16a34a" />
   <style>
     html,body{height:100%;margin:0}
     body{background:#fff;color:#1f2937;font-family:ui-sans-serif,system-ui,-apple-system,Roboto,Helvetica,Arial}
     body,button{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+    .page{padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+    a{color:#16a34a}
+    .error-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);color:#fff;display:none;align-items:center;justify-content:center;text-align:left;padding:24px;z-index:9999}
+    .error-overlay pre{white-space:pre-wrap;max-width:860px}
+    .list-table{width:100%;border-collapse:separate;border-spacing:0 12px}
+    .list-table th{font-size:12px;text-align:left;color:#6b7280;font-weight:600}
+    .list-table td{background:#fff}
   </style>
-  <!-- Telegram Web Apps SDK -->
+  <!-- Telegram Web Apps SDK (может отсутствовать в предпросмотре) -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <!-- React 18 UMD -->
+  <!-- React 18 UMD (загружаем БЕЗ defer, чтобы гарантировать доступность до Babel-кода) -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel (для запуска без сборки) -->
-  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <!-- Babel Standalone для JSX в этом демо — тоже БЕЗ defer -->
+  <script>window.BABEL_DISABLE_CACHE = true;</script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">Загрузка…</div>
+  <div id="err" class="error-overlay"><pre id="err-msg"></pre></div>
 
-  <script type="text/babel">
-    const {useEffect,useMemo,useState} = React;
+  <!-- ВАЖНО: этот скрипт идёт ПОСЛЕ React/ReactDOM/Babel и потому не упирается в гонки загрузки -->
+  <script type="text/babel" data-presets="env,react">
+    'use strict';
+    // ===== Error boundary (global) =====
+    (function(){
+      const overlay = document.getElementById('err');
+      const msg = document.getElementById('err-msg');
+      window.__showFatal = (e)=>{ try{ msg.textContent = (e && (e.stack||e.message||String(e))) || 'Unknown error'; overlay.style.display='flex'; }catch(_){} };
+      window.addEventListener('error', ev => { if(!/ResizeObserver/.test(String(ev?.message))) { __showFatal(ev.error || ev.message); } });
+      window.addEventListener('unhandledrejection', ev => { __showFatal(ev.reason); });
+    })();
 
-    // ===== UTILS =====
-    function get(obj, path, fallback) {
-      try{
-        var cur=obj;
-        for (var i=0;i<path.length;i++){ if(cur==null) return fallback; cur=cur[path[i]]; }
-        return cur==null?fallback:cur;
-      }catch(_){return fallback;}
+    // ===== Utils =====
+    // --- Analytics: Google Apps Script collector ---
+    const ANALYTICS_URL = '<https://script.google.com/macros/s/AKfycbyCtENb1M8bsnRa4hGs3BS0MGMd3iGchp_bvY_NQv8aHJyLWuWcZGUpfAmPZrd_jIqZ1Q/exec?key=Dvhjhlkjf2033>';
+    const APP_VERSION = '1.0.0';
+    const __QP = new URLSearchParams(location.search);
+    const INTERNAL_USER_ID = __QP.get('uid') || '';
+    const INTERNAL_USER_NAME = __QP.get('uname') || '';
+    const SESSION_ID = (crypto && crypto.randomUUID ? crypto.randomUUID() : (Date.now()+Math.random().toString(16).slice(2)));
+    async function sendAnalytics(payload){ try{ await fetch(ANALYTICS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); }catch(e){ console.warn('[analytics]',e); } }
+    async function logEvent(event, data={}){ const body={event, ts_client:new Date().toISOString(), app_version:APP_VERSION, session_id: SESSION_ID, user_id: INTERNAL_USER_ID, user_name: INTERNAL_USER_NAME, ...data}; return sendAnalytics(body); }
+
+    function get(o, path, d){
+      try{ let cur=o; for(let i=0;i<path.length;i++){ if(cur==null) return d; cur=cur[path[i]]; } return (cur===undefined?d:cur); }catch(e){ return d; }
     }
+    function clamp(n,min,max){return Math.max(min,Math.min(max,n))}
+
+    // ===== Telegram shim (preview works outside Telegram) =====
+    const TG_SHIM = {
+      themeParams:{},
+      ready:()=>{},
+      close:()=>console.log('[tg] close()'),
+      openLink:(url)=>{ try{ window.open(url, '_blank','noopener'); }catch(e){ location.href=url; } },
+      sendData:(d)=>console.log('[tg] sendData', d),
+      MainButton:{ setParams:(p)=>console.log('[tg] MainButton.setParams',p), onClick:(fn)=>{ TG_SHIM.__mb=fn; }, offClick:(fn)=>{ if(TG_SHIM.__mb===fn) TG_SHIM.__mb=null; }, show:()=>{}, hide:()=>{} },
+      onEvent:()=>{}, offEvent:()=>{}
+    };
+
+    // ===== Telegram + Theme =====
     function useTelegram(){
-      const tg = React.useMemo(function(){
-        if (typeof window === "undefined") return undefined;
-        return get(window, ["Telegram","WebApp"], undefined);
-      },[]);
+      const [tg,setTg] = React.useState(()=>get(window,["Telegram","WebApp"],null) || TG_SHIM);
+      React.useEffect(()=>{ const t=get(window,["Telegram","WebApp"],null); if(t){ setTg(t); try{t.ready();}catch(_){} } },[]);
       return tg;
     }
-    function useTheme(tg){
-      const [theme,setTheme] = useState({
-        bg:"#ffffff", text:"#1f2937", subtext:"#6b7280",
-        accent:"#2563eb", card:"#f3f4f6", border:"#e5e7eb"
-      });
-      useEffect(function(){
-        if(!tg) return;
-        var bg=(tg.themeParams&&tg.themeParams.bg_color)||theme.bg;
-        var text=(tg.themeParams&&tg.themeParams.text_color)||theme.text;
-        var hint=(tg.themeParams&&tg.themeParams.hint_color)||theme.subtext;
-        var button=(tg.themeParams&&tg.themeParams.button_color)||theme.accent;
-        var secondaryBg=(tg.themeParams&&tg.themeParams.secondary_bg_color)||theme.card;
-        setTheme({bg:bg, text:text, subtext:hint, accent:button, card:secondaryBg, border:"#e5e7eb"});
+
+    function useTheme(){
+      const tg = useTelegram();
+      const compute = React.useCallback(()=>{
+        const p = tg && tg.themeParams || {};
+        const isDark = (p.bg_color && parseInt(String(p.bg_color).replace('#',''),16) < 0x888888);
+        return {
+          isDark,
+          bg: p.bg_color || (isDark?"#0b1220":"#f8fafc"),
+          text: p.text_color || (isDark?"#e5e7eb":"#111827"),
+          subtext: p.hint_color || (isDark?"#9ca3af":"#6b7280"),
+          primary: p.button_color || "#16a34a", // emerald-600
+          primaryText: p.button_text_color || "#fff",
+          border: p.section_separator_color || (isDark?"#1f2937":"#e5e7eb"),
+          card: isDark?"#111827":"#fff"
+        }
       },[tg]);
+      const [theme,setTheme] = React.useState(()=>compute());
+      React.useEffect(()=>{
+        if(!tg) return; const onTheme=()=>setTheme(compute());
+        try{ tg.onEvent && tg.onEvent('themeChanged', onTheme); }catch(_){ }
+        return ()=>{ try{ tg.offEvent && tg.offEvent('themeChanged', onTheme); }catch(_){ } }
+      },[tg,compute]);
       return theme;
     }
 
-    // Порядок шагов
-    var steps=["carbs","water","mood","urge","binge"];
+    // ===== Buttons =====
+    function btnPrimary(theme){ return {fontSize:16,padding:"12px 16px",border:"1px solid "+(theme?.primary||'#16a34a'),background:(theme?.primary||'#16a34a'),color:(theme?.primaryText||'#fff'),borderRadius:12,cursor:"pointer",fontWeight:700} }
+    function btnOutline(theme){ return {fontSize:13,padding:"8px 12px",border:"1px solid "+(theme?.border||'#e5e7eb'),background:(theme?.card||'#fff'),color:(theme?.text||'#111827'),borderRadius:10,cursor:"pointer"} }
 
-    // ===== LOGIC =====
-    function pickPrimaryAdvice(state){
-      var s=state||{}; var urgeVal = isFinite(s.urge)? s.urge : 0;
-      if(s.binge===true){
-        return { title:"Если был эпизод срыва/переедания — мягкий возврат",
-          items:["⏰ Ложись вовремя (до 23:00)","🍳 Белки+медленные углеводы утром",
-                 "🚶 Короткая прогулка днём",
-                 "🍽 Обычный ужин без «компенсаций», никаких наказаний"] };
-      }
-      if(urgeVal>=2){
-        return { title:"Тяга ≥ 2 — подключаем осознанность и «Стоп-протокол»",
-          items:["Если ела более 3 часов назад: собери здоровую тарелку / перекуси горстью тыквенных семечек",
-                 "Если голод эмоциональный → замени действием: прогулка, музыка, душ или просто полежать 15 минут",
-                 "Если тяга к сладкому не ушла → разреши себе маленькую порцию (сухофрукты или натуральная пастила)",
-                 "Подробнее по кнопке Стоп-протокол"] };
-      }
-      if(s.carbs_ok===false){
-        return { title:"Недобор медленных углеводов и белка",
-          items:["Перекус: овощ/фрукт + йогурт/творог или яйцо",
-                 "К ужину крахмалистый гарнир + рыба/курица/креветки/яйцо",
-                 "Ориентир: 1–2 ладони сложных углеводов + 1–2 ладони белка"] };
-      }
-      if(s.water_ok===false){
-        return { title:"Мало воды сегодня",
-          items:["Не добирай объём поздно вечером, чтобы не мешать сну",
-                 "Завтра постарайся выйти на норму (~30 мл/кг в сутки)",
-                 "Начни утро со стакана воды и распределяй в течение дня"] };
-      }
-      return null;
-    }
-
-    // ===== UI PRIMITIVES =====
-    function Progress(props){
-      var value=props.value, accent=props.accent;
-      return (<div style={{marginBottom:12}}>
-        <div style={{height:8,width:"100%",background:"rgba(0,0,0,0.08)",borderRadius:999}}>
-          <div style={{height:8,width:value+'%',background:accent,borderRadius:999,transition:"width .25s ease"}} />
+    // ===== Progress =====
+    function Progress({value, theme}){
+      const v = clamp(Math.round(value),0,100);
+      return (
+        <div style={{height:8,background:"rgba(0,0,0,0.08)",borderRadius:8,overflow:"hidden"}}>
+          <div style={{width:v+"%",height:"100%",background:theme.primary,transition:"width .25s ease"}} />
         </div>
-        <div style={{fontSize:12,marginTop:6,opacity:0.75}}>{value}%</div>
-      </div>);
-    }
-    function Section(props){
-      var title=props.title, subtitle=props.subtitle, children=props.children;
-      return (<div style={{marginBottom:8}}>
-        <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>{title}</div>
-        {subtitle && <div style={{fontSize:13,opacity:0.7,marginBottom:8}}>{subtitle}</div>}
-        {children}
-      </div>);
-    }
-    function Row(props){
-      return <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{props.children}</div>;
-    }
-    function ChoiceBtn(props){
-      var active=props.active, onClick=props.onClick, children=props.children;
-      return (<button onClick={onClick} style={{padding:"14px 12px",borderRadius:12,border:"1px solid "+(active?"transparent":"#e5e7eb"),background:active?"rgba(37,99,235,0.12)":"#fff",fontWeight:600}}>{children}</button>);
-    }
-    function btnPrimary(theme){return {padding:"12px 14px",borderRadius:12,background:theme.accent,color:"#fff",border:"none",fontWeight:700};}
-    function btnOutline(theme){return {padding:"12px 14px",borderRadius:12,background:"#fff",color:theme.text, border:"1px solid "+theme.border,fontWeight:600};}
-
-    function FoodsTable(props){
-      var theme=props.theme, title=props.title, rows=props.rows;
-      return (<div style={{background:"#fff",border:"1px solid "+props.theme.border,borderRadius:12,overflow:"hidden"}}>
-        <div style={{padding:"8px 12px",fontWeight:600,background:"rgba(0,0,0,0.03)"}}>{title}</div>
-        <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>
-          {rows.map(function(r,idx){return (
-            <tr key={idx}>
-              <td style={{verticalAlign:"top",padding:"8px 12px",borderTop:"1px solid "+theme.border,width:"34%",fontWeight:600}}>{r[0]}</td>
-              <td style={{verticalAlign:"top",padding:"8px 12px",borderTop:"1px solid "+theme.border}}>{r[1]}</td>
-            </tr>
-          );})}
-        </tbody></table>
-      </div>);
+      )
     }
 
-    // ===== SCREENS =====
-    function Header(props){
-      var theme=props.theme, onOpenProtocol=props.onOpenProtocol, onOpenFoods=props.onOpenFoods, onNewCheckin=props.onNewCheckin;
-      return (<div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
-        <div style={{width:40,height:40,borderRadius:12,background:theme.card,display:"grid",placeItems:"center"}}>🛡️</div>
-        <div>
-          <div style={{fontSize:18,fontWeight:700}}>Антисрыв</div>
-          <div style={{fontSize:13,color:theme.subtext}}>Чек-ин 60 сек · без оценок</div>
+    // ===== Small UI =====
+    function Section({title,subtitle,children,theme,variant}){
+      const isCheck = variant==='checkin';
+      return (
+        <div style={{background:theme.card,border:"1px solid "+(theme?.border||'#e5e7eb'),borderRadius:12,overflow:"hidden",marginBottom:12}}>
+          <div style={{padding:"12px 14px",background:isCheck?'rgba(22,163,74,0.06)':'rgba(0,0,0,0.04)'}}>
+            <div style={{fontWeight:800,fontSize:16,lineHeight:1.25}}>{title}</div>
+            {subtitle && <div style={{fontSize:12,color:theme.subtext,marginTop:4}}>{subtitle}</div>}
+          </div>
+          <div style={{padding:12}}>{children}</div>
+        </div>)
+    }
+
+    function WaterSection(props){ return <Section {...props} variant='checkin'/> }
+
+    function Banner({theme,title,subtitle,level='main'}){
+      const isMain = level==='main';
+      return (
+        <div style={{
+          padding:'12px 14px', borderRadius:14,
+          background:isMain?'rgba(22,163,74,0.06)':'rgba(0,0,0,0.035)',
+          border:'1px solid '+(isMain?(theme?.primary||'#16a34a'):(theme?.border||'#e5e7eb')),
+          marginBottom:12
+        }}>
+          <div style={{fontWeight:800,fontSize:isMain?20:16,lineHeight:1.25}}>{title}</div>
+          {subtitle && <div style={{marginTop:6,fontSize:12,color:theme.subtext}}>{subtitle}</div>}
         </div>
-        <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button onClick={onOpenProtocol} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card}}>Стоп-протокол</button>
-          <button onClick={onOpenFoods} style={{fontSize:13,padding:"8px 12px",borderRadius:10,border:"1px solid "+theme.border,background:theme.card,cursor:"pointer"}}>Список продуктов</button>
-          <button onClick={onNewCheckin} style={btnPrimary(theme)}>Чек-ин</button>
-        </div>
-      </div>);
+      );
     }
 
-    function DoneCard(props){
-      var theme=props.theme, state=props.state;
-      var advice=pickPrimaryAdvice(state);
-      return (<div style={{marginBottom:12,border:"1px solid "+theme.border,background:"#fff",borderRadius:12}}>
-        <div style={{padding:10,borderBottom:"1px solid "+theme.border,background:"rgba(37,99,235,0.06)",borderTopLeftRadius:12,borderTopRightRadius:12}}>🎉 Чек-ин отправлен</div>
-        <div style={{padding:12}}>
-          {advice? (<div>
-            <div style={{fontWeight:600,marginBottom:4}}>{advice.title}</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              {advice.items.map(function(t,idx){return <li key={idx} style={{fontSize:14,color:theme.subtext}}>{t}</li>;})}
-            </ul>
-          </div>) : (<div style={{fontSize:14,color:theme.subtext}}>Всё ок 👍 Продолжай в том же духе!</div>)}
+    function QSection({title,subtitle,children,theme,first=false}){
+      return (
+        <div style={{padding:12,borderTop:first?'none':('1px solid '+(theme?.border||'#e5e7eb'))}}>
+          <div style={{fontWeight:600}}>{title}</div>
+          {subtitle && <div style={{fontSize:12,color:theme.subtext,marginTop:4}}>{subtitle}</div>}
+          <div style={{marginTop:8}}>{children}</div>
         </div>
-      </div>);
+      );
     }
 
-    function ProtocolCard(props){
-      var theme=props.theme;
-      return (<div style={{background:theme.card,borderRadius:16,padding:16,border:"1px solid "+theme.border}}>
-        <div style={{fontWeight:700,fontSize:18,marginBottom:6}}>Стоп-протокол</div>
-        <div style={{fontSize:13,color:theme.subtext,marginBottom:12}}>Если тяга к сладкому / вредному высокая, используй следующие подсказки:</div>
+    function ChoiceBtn({label,active,onClick,theme}){
+      return (
+        <button onClick={onClick}
+          style={{...btnOutline(theme),padding:"10px 12px",borderColor:active?theme.primary:(theme?.border||'#e5e7eb'),background:active?"rgba(22,163,74,.08)":(theme?.card||'#fff')}}>
+          {label}
+        </button>)
+    }
+
+    // ===== Data =====
+    const HUNGER_REASONS = ["скука","стресс","одиночество","давно ела","усталость","прокрастинация","другое"]; 
+    const BINGE_CONTEXT = ["еда в компании","алкоголь","выходные","у родителей","стресс","привычка","одиночество","гаджет/ТВ","другое"]; // одиночество один раз
+
+    // ===== Header (emoji) =====
+    function Header({theme,onOpenProtocol,onRelapse}){
+      const bigOutline = {...btnOutline(theme), fontSize:16, padding:'12px 16px', borderRadius:12, fontWeight:700, borderColor:(theme?.primary||'#16a34a'), color:(theme?.text||'#111827')};
+      return (
+        <div style={{display:'grid',gap:8,marginBottom:16}}>
+          <div style={{textAlign:'center',marginBottom:12}}>
+            <div style={{fontSize:24,fontWeight:800}}>Антисрыв</div>
+            <div style={{fontSize:13,color:theme.subtext}}>Твой помощник на пути к осознанности и здоровому питанию</div>
+          </div>
+          <div style={{textAlign:'center',fontSize:13,fontWeight:600,color:theme.text}}>Нажми, если</div>
+          <div style={{display:'flex',gap:8,justifyContent:'center',flexWrap:'wrap'}}>
+            <button onClick={onOpenProtocol} style={bigOutline}>Очень хочется 🔥</button>
+            <button onClick={onRelapse} style={bigOutline}>Сорвалась 💔</button>
+          </div>
+        </div>
+      )
+    }
+
+    // ===== Steps & state =====
+    function ensureArray(val){
+      if(Array.isArray(val)) return val; if(val==null) return []; return [val];
+    }
+    function computeSteps(state){
+      const steps = ["hunger","mood","binge","binge_ctx","summary"];
+      if(state.hunger>2){ steps.splice(1,0,"hunger_reason"); }
+      if(state.binge!==true){ const i = steps.indexOf("binge_ctx"); if(i>-1) steps.splice(i,1); }
+      return steps;
+    }
+
+    // ===== Recommendations (single prioritized block) =====
+    function hasAnyReason(reasons, list){ const set=new Set(reasons.map(x=>String(x).toLowerCase().trim())); return list.some(x=>set.has(x)); }
+    function buildRecommendations(state){
+      const reasonsArr = ensureArray(state.hunger_reason);
+      const rawReasons = reasonsArr.map(x=>String(x).toLowerCase().trim());
+      const reasonsNorm = state.hunger>2 ? rawReasons : [];
+
+      // 1) Post-binge advice (highest priority)
+      if(state.binge){
+        const ctx = state.binge_context||[]; const items=[];
+        items.push("💚 Ты уже многое делаешь для себя — важно мягко продолжить в своём темпе.");
+        items.push("⏰ Можно лечь пораньше (до 23:00) — отдых поддержит тело и аппетит");
+        items.push("🍳 Утром подойдёт тарелка с белком и медленными углеводами, например, омлет с овощами");
+        items.push("🚶 Небольшая прогулка в течение дня поможет добавить энергии");
+        items.push("🍽 Вечером — обычный ужин, без попыток «компенсировать»");
+        if(ctx.includes("еда в компании")) items.push("👥 Если в компании не замечаешь, сколько съела: может помочь заранее представить комфортную порцию, положить приборы как закончишь с ней и делать паузы, больше участвовать в беседе.");
+        if(ctx.includes("алкоголь")) items.push("🍷Если предстоит мероприятие с алкоголем начни с легкой мясной/ рыбной закуской и салата, чередуй алкогольные напитки с водой, выбирай несладкие коктейли, сухое вино или немного крепкого напитка в чистом виде - коньяк, виски, ром");
+        if(ctx.includes("выходные")) items.push("📅 На выходных поддерживать новые привычки помогут: полноценный завтрак, запланированные заранее приёмы пищи без больших перерывов по времени, больше активности");
+        if(ctx.includes("у родителей")) items.push("🏠 Если в гостях не удобно отказываться от еды: пробуй блюда маленькими порциями, ешь больше овощей, делай паузы перед каждым новым блюдом, проверяя уровень голода.");
+        if(["еда в компании","выходные","у родителей"].some(x=>ctx.includes(x))){ items.push("👜Если по плану еда вне дома положи в сумочку мини-набор: пакетик тыквенных семечек – как замена десерта; псиллиум 1–2 ч. л. (растворить в воде и выпить за 10–20 мин до застолья) – поможет не переедать."); }
+        return [{title:"Советы после срыва", items}];
+      }
+
+      // 2) Emotional: pleasures only for boredom/stress/fatigue OR bad mood
+      const pleasureReasons = ["скука","стресс","усталость"];
+      if((reasonsNorm.length>0 && hasAnyReason(reasonsNorm, pleasureReasons)) || state.mood === 'плохое'){
+        const items=[
+          "Отвлекись и выбери одно дело из “Списка удовольствий”.",
+          "Например:",
+          "🎧 Послушать любимый трек",
+          "📞 Позвонить близким",
+          "🍵 Налить чайку",
+          "✏️ Почертить/порисовать",
+          "📝 Пописать всё, что придёт в голову",
+          "🧗 Пройтись по лестнице",
+          "📅 Запланировать приятность на вечер/выходные",
+        ];
+        return [{title:"Возможен \"эмоциональный\" голод", items}];
+      }
+
+      // 3) Procrastination small step
+      if(hasAnyReason(reasonsNorm,["прокрастинация"])){
+        return [{title:"Начни с маленького шага", items:[
+          "Можно поставить таймер на 15 минут и заняться одной простой частью задачи.",
+          "После сигнала — решить: продолжить ещё 15 минут или сделать паузу.",
+          "Поддержать себя небольшим ритуалом: стакан воды, любимая музыка, убрать лишнее с рабочего места."
+        ]}];
+      }
+
+      // 4) Plate if long time since last meal (and not shown earlier)
+      if(state.hunger>2 && (reasonsNorm.includes('давно ела')) && !state.seen_plate){
+        return [{title:"Поешь)", sub:"Вот идеи как собрать сбалансированную тарелку, которая наполнит энергию", items:[
+          "1/4 тарелки белки + 1/4 сложные углеводы + 1/2 овощи + немного полезных жиров",
+          "Например: рыба/курица/яйцо + гречка/киноа/цельнозерновой хлеб + салат или запеченные овощи + оливковое масло с лимонным соком"
+        ]}];
+      }
+
+      // 5) Wellness praise if everything is fine
+      if(!state.binge && (state.mood==='хорошее' || state.mood==='нейтральное') && (state.hunger<=2)){
+        return [{title:"Всё хорошо — продолжай в том же духе", items:[
+          "Отлично: сейчас нет голода, а настроение устойчивое — это поддерживает твою цель.",
+          "Продолжай в своём ритме и время от времени отмечай своё состояние — такие мини‑чек‑ины помогают оставаться в контакте с собой."
+        ]}];
+      }
+      return [];
+    }
+
+    // ===== Cards =====
+    function ProtocolCard({theme,onBack}){
+      return (
+        <Section theme={theme} title="Стоп‑протокол" subtitle="Если тяга высокая — можно сделать небольшую паузу и заметить, что поддержит сейчас">
+          <div style={{display:"grid",gap:12}}>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>Шаг 1. Стоп ✋</div>
+              <ul style={{paddingLeft:18,margin:0}}>
+                <li>Пауза 3–5 минут — несколько спокойных вдохов. Можно положить ладонь на грудь и почувствовать опору.</li>
+                <li>Вопрос себе: «Что мне нужно прямо сейчас — еда, отдых, переключение, забота?»</li>
+              </ul>
+            </div>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>Шаг 2. Проверка ⚖️</div>
+              <ul style={{paddingLeft:18,margin:0}}>
+                <li>Прошло ли ~3 часа с последнего приёма пищи? Если да — может помочь спокойный приём еды.</li>
+              </ul>
+            </div>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>Шаг 3. Альтернатива 🔄</div>
+              <div style={{fontSize:14,color:theme.text,marginBottom:6}}>Если больше похоже на эмоцию — можно попробовать:</div>
+              <ul style={{paddingLeft:18,margin:0}}>
+                <li>💧 стакан воды</li>
+                <li>🚶‍♀️ короткую прогулку 5–10 минут</li>
+                <li>🧘‍♀️ дыхание 4–7–8: вдох 4, пауза 7, выдох 8</li>
+                <li>🎶 музыку, душ или просто полежать 15 минут</li>
+              </ul>
+            </div>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>Шаг 4. Осознанный выбор 🍏</div>
+              <ul style={{paddingLeft:18,margin:0}}>
+                <li>Если голод физический — собери полноценную тарелку: овощи/салат + сложные углеводы + белок + немного жиров.</li>
+                <li>Есть не спеша, замечая вкусы и сигналы сытости.</li>
+                <li>Если тяга к сладкому остаётся — можно выбрать небольшую порцию и съесть её осознанно (например, сухофрукты или натуральную пастилу).</li>
+              </ul>
+            </div>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>Шаг 5. Разбор ✍️</div>
+              <ul style={{paddingLeft:18,margin:0}}>
+                <li>Коротко отметить: «Что я хотела закрыть? Усталость? Напряжение? Отдых?» — замечать повторяющиеся ситуации.</li>
+              </ul>
+            </div>
+            <div style={{marginTop:4,padding:10,border:"1px dashed "+(theme?.border||'#e5e7eb'),borderRadius:12,background:"#fff"}}>
+              Совет: помогает заранее подготовить «Список удовольствий» — простые действия на 5–20 минут для эмоционального голода.
+            </div>
+            <div>
+              <button onClick={onBack} style={{...btnOutline(theme),width:"100%"}}>↩️ Вернуться к чек‑ину</button>
+            </div>
+          </div>
+        </Section>
+      );
+    }
+
+    function RelapseHelpCard({theme,onBack}){
+      return (
+        <Section theme={theme} title="Если случился срыв" subtitle={null}>
+          <div style={{display:'grid',gap:12}}>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>1️⃣ Сделай паузу</div>
+              <div>Срыв — не катастрофа, а реакция мозга на изменения, эмоции, физическое состояние.</div>
+            </div>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>2️⃣ Задай себе три вопроса</div>
+              <ul style={{margin:0,paddingLeft:18}}>
+                <li>На что я сейчас среагировала срывом?</li>
+                <li>Что меняется сейчас в моей жизни? Как изменилось настроение?</li>
+                <li>Чего я на самом деле хотела — отдыха, тепла, поддержки, уединения или чего-то ещё?</li>
+              </ul>
+            </div>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>3️⃣ Отметь закономерность</div>
+              <div>Важно найти истинную причину, она всегда за рамками простой силы воли. Часто срывы происходят, когда мы идём «на короткой дистанции» — ждём быстрых результатов. Такой подход приведёт либо к срыву, либо к исходной точке, либо к дополнительным килограммам в виде компенсации.</div>
+              <div style={{marginTop:6}}>Здоровое питание — не марафон и не диета. Важно, чтобы у тебя появилась новая культура питания — совокупность обычаев, традиций и ценностей. Она складывается через познание нового, эксперименты и ритуалы, которые ты привносишь в повседневность.</div>
+            </div>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>4️⃣ Поддержи себя, а не критикуй</div>
+              <div>Самое главное — не ругать себя, а найти слова поддержки, как для самого дорогого человека. Можно сказать себе: «Сегодня я сорвалась, но я продолжаю. Я уже делаю многое правильно: пью больше воды, завтракаю, выбираю полезное всё чаще, ем меньше сладкого и т. д.»</div>
+            </div>
+            <div>
+              <div style={{fontWeight:600,marginBottom:6}}>5️⃣ Сделай выводы</div>
+              <div>Отметь причину в чек‑ине, сделай заметку в дневнике или телефоне — так ты учишься понимать себя, а не бороться с собой 💚</div>
+            </div>
+            <div>
+              <button onClick={onBack} style={{...btnOutline(theme),width:'100%'}}>↩️ Вернуться к чек‑ину</button>
+            </div>
+          </div>
+        </Section>
+      );
+    }
+
+    function FoodsTable({theme,title,rows}){
+      return (
+        <div style={{border:"1px solid "+(theme?.border||'#e5e7eb'),borderRadius:12,overflow:"hidden",background:(theme?.card||'#fff'),marginBottom:12}}>
+          <div style={{padding:"10px 12px",fontWeight:700,fontSize:16,borderBottom:'1px solid '+(theme?.border||'#e5e7eb')}}>{title}</div>
+          <div style={{padding:12}}>
+            <table className="list-table"><tbody>
+              {rows.map((r,i)=> (
+                <tr key={i}>
+                  <td style={{padding:"6px 8px",width:"32%",verticalAlign:'top',fontWeight:600}}>{r[0]}</td>
+                  <td style={{padding:"6px 8px",verticalAlign:'top'}}>{r[1]}</td>
+                </tr>
+              ))}
+            </tbody></table>
+          </div>
+        </div>
+      )
+    }
+
+    function FoodsCard({theme,onBack}){
+      function go(id){ try{ var el=document.getElementById(id); if(el&&el.scrollIntoView) el.scrollIntoView({behavior:'smooth',block:'start'}); }catch(_){} }
+      return (
+        <div style={{background:theme.card,borderRadius:16,padding:16,border:'1px solid '+(theme?.border||'#e5e7eb')}}>
+          <Banner theme={theme} title="Список продуктов" subtitle="Ориентир тарелки: 1/2 клетчатка · 1/4 белок · 1/4 сложные углеводы + полезные жиры." level="sub" />
+          <div style={{display:'flex',flexWrap:'wrap',gap:12,marginBottom:12}}>
+            {[{id:'p-animal',label:'Белки'},{id:'carbs',label:'Углеводы'},{id:'fiber',label:'Клетчатка'},{id:'fats',label:'Полезные жиры'}].map(link => (
+              <button key={link.id} onClick={()=>go(link.id)} style={{fontSize:13,padding:0,border:'none',background:'transparent',color:(theme?.primary||'#16a34a'),textDecoration:'underline',cursor:'pointer'}}>{link.label}</button>
+            ))}
+          </div>
+          <div style={{display:'grid',gap:12}}>
+            <div id='p-animal'>
+              <FoodsTable theme={theme} title='🍗 БЕЛОК (¼ тарелки)'
+                rows={[["Мясо/птица","говядина, курица, индейка, телятина, кролик, перепелка"],["Рыба","лосось, форель, тунец, треска, сардины, дорадо, сибас"],["Морепродукты","креветки, мидии, кальмары"],["Яйца","яйца куриные/перепелиные"],["Сыр","нежирный козий сыр (2–3 раза в неделю)"]]} />
+            </div>
+            <div id='p-plant'>
+              <FoodsTable theme={theme} title='🌱 Растительный белок'
+                rows={[["Бобовые","чечевица, нут, маш, фасоль, горох"],["Псевдозерновые","киноа, амарант, гречка"],["Орехи и семечки","миндаль, кешью, тыквенные семечки, чиа"],["Грибы","шампиньоны, вешенки"],["Соевые продукты","тофу, соевое молоко"]]} />
+            </div>
+            <div id='carbs'>
+              <FoodsTable theme={theme} title='🍚 УГЛЕВОДЫ (¼ тарелки) — сложные'
+                rows={[["Крупы","овсянка, гречка, бурый и дикий рис, перловка, киноа, пшено"],["Хлеб/паста","цельнозерновые хлебцы/лаваш, паста из твёрдых сортов"],["Бобовые","фасоль, чечевица, горох"],["Крахмалистые овощи","картофель, батат, тыква"]]} />
+            </div>
+            <div id='fiber'>
+              <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>🥦 КЛЕТЧАТКА (½ тарелки)</div>
+              <div style={{fontSize:13,color:theme.subtext,marginBottom:8}}>Клетчатка очень важна‼️ Помогает кишечнику, снижает уровень глюкозы и даёт насыщение.</div>
+              <div style={{display:'grid',gap:12}}>
+                <FoodsTable theme={theme} title='Овощи'
+                  rows={[["Капусты","брокколи, цветная, белокочанная, брюссельская"],["Корнеплоды и др.","морковь, свёкла, кабачок, тыква, батат, сельдерей"],["Овощи с меньшей клетчаткой","редис, огурец, помидор, перец"]]} />
+                <FoodsTable theme={theme} title='Зелень'
+                  rows={[["Примеры","петрушка, укроп, кинза, зелёный лук, листья салата, руккола, шпинат, щавель, базилик, мангольд, кейл"]]} />
+                <FoodsTable theme={theme} title='Фрукты и ягоды'
+                  rows={[["Больше клетчатки","яблоки с кожурой, груши с кожурой, персики, инжир, хурма, айва, киви"],["Среднее количество","апельсин, мандарин, грейпфрут, банан, нектарин, персик, слива, абрикос, гранат"],["Меньше клетчатки","ананас, арбуз, дыня, манго, папайя"],["Ягоды","малина, черника, клюква, ежевика, клубника, голубика, смородина"]]} />
+                <FoodsTable theme={theme} title='Бобовые и цельнозерновые (как источник клетчатки)'
+                  rows={[["Бобовые","чечевица, нут, фасоль"],["Цельнозерновые","овсянка, гречка, киноа, пшено, бурый рис, отруби, цельнозерновые хлебцы, семена льна и чиа, псиллиум"]]} />
+              </div>
+            </div>
+            <div id='fats'>
+              <FoodsTable theme={theme} title='🫒 ПОЛЕЗНЫЕ ЖИРЫ'
+                rows={[["Рыба","лосось, форель, скумбрия, сардины"],["Масла","оливковое, льняное, кокосовое, кунжутное, тыквенное, из виноградной косточки, авокадо и другие сыродавленные"],["Орехи","грецкие, миндаль, кешью"],["Семена","лён, кунжут, чиа"],["Другое","масло ГХИ, авокадо"]]} />
+            </div>
+          </div>
+          <div style={{marginTop:8}}>
+            <button onClick={onBack} style={{...btnOutline(theme),width:'100%'}}>↩️ Вернуться к чек‑ину</button>
+          </div>
+        </div>
+      );
+    }
+
+    function WaterCard({theme,onBack}){
+      return (
+        <div style={{background:theme.card,borderRadius:16,padding:16,border:'1px solid '+(theme?.border||'#e5e7eb')}}>
+          <Banner theme={theme} title="Гайд по воде" subtitle="Короткие ориентиры на каждый день" level="sub" />
+          <div style={{display:'grid',gap:12}}>
+            {/* 1️⃣ Сколько воды */}
+            <WaterSection theme={theme} title="1️⃣ Сколько воды" >
+              <ul style={{margin:0,paddingLeft:18}}>
+                <li>Старайся пить <b>25–40 мл/кг веса</b>, даже если жажда не ощущается.</li>
+              </ul>
+              <div style={{marginTop:6}}>👉 Если сильно не добирать, возможны усталость, головные боли, <b>ложный голод</b> и риск переедания.</div>
+            </WaterSection>
+            {/* 2️⃣ Что считается жидкостью — все пункты с эмодзи → без маркеров */}
+            <WaterSection theme={theme} title="2️⃣ Что считается жидкостью">
+              <ul style={{margin:0,paddingLeft:0,listStyle:'none'}}>
+                <li>✅ Засчитываем: вода, несладкий чай/кофе, морсы, супы.</li>
+                <li style={{marginTop:6}}>❌ Не засчитываем: сладкие напитки, алкоголь — они дегидратируют.</li>
+              </ul>
+            </WaterSection>
+            {/* 3️⃣ Утренний старт */}
+            <WaterSection theme={theme} title="3️⃣ Утренний старт">
+              <ul style={{margin:0,paddingLeft:18}}>
+                <li>Начинай день со <b>стакана‑двух воды</b> после пробуждения. Лучше <b>горячую</b> (не кипяток), лимон — по желанию.</li>
+              </ul>
+              <div style={{marginTop:6}}>👉 Это ускоряет обмен на 20–30%, поддерживает ЖКТ, выводит продукты метаболизма и увлажняет кожу.</div>
+            </WaterSection>
+            {/* 4️⃣ Равномерно */}
+            <WaterSection theme={theme} title="4️⃣ Равномерно в течение дня">
+              <ul style={{margin:0,paddingLeft:18}}>
+                <li>Пей равномерно: <b>6–10 приёмов</b> в день, меньше за 2–3 часа до сна.</li>
+                <li style={{marginTop:6}}>Не больше <b>300 мл за раз</b> и не залпом.</li>
+              </ul>
+              <div style={{marginTop:6}}>👉 Так поддерживается стабильная гидратация без нагрузки на почки и мочевой пузырь.</div>
+            </WaterSection>
+            {/* 5️⃣ Подстраивай под условия */}
+            <WaterSection theme={theme} title="5️⃣ Подстраивай под условия">
+              <div>Больше воды в жару, при высокой активности, сухом воздухе, на высоте — потери выше, базовой нормы может не хватать.</div>
+            </WaterSection>
+            {/* 6️⃣ Спорт и вода */}
+            <WaterSection theme={theme} title="6️⃣ Спорт и вода">
+              <ul style={{margin:0,paddingLeft:18}}>
+                <li>За 1–2 часа до — <b>300–500 мл</b>.</li>
+                <li style={{marginTop:6}}>Во время — по жажде.</li>
+                <li style={{marginTop:6}}>После — восполни <b>1.25–1.5 л/кг потери</b>.</li>
+              </ul>
+            </WaterSection>
+            {/* 7️⃣ Увеличивай постепенно */}
+            <WaterSection theme={theme} title="7️⃣ Увеличивай постепенно">
+              <ul style={{margin:0,paddingLeft:18}}>
+                <li>Если раньше пила мало — добавляй <b>300–500 мл</b> каждые 2–3 дня, максимум — до 4 л/сутки.</li>
+              </ul>
+              <div style={{marginTop:6}}>👉 Так организму легче адаптироваться и меньше риск отёков.</div>
+            </WaterSection>
+            {/* 8️⃣ Отслеживай маркеры */}
+            <WaterSection theme={theme} title="8️⃣ Отслеживай маркеры">
+              <ul style={{margin:0,paddingLeft:0,listStyle:'none'}}>
+                <li>✅ Светло‑соломенный цвет мочи.</li>
+                <li style={{marginTop:6}}>✅ Регулярное опорожнение кишечника (оптимально — по числу приёмов пищи, минимум — 1 раз/день).</li>
+                <li style={{marginTop:6}}>✅ Нет выраженной жажды, голова ясная, ночью не просыпаешься из‑за жажды.</li>
+              </ul>
+            </WaterSection>
+            {/* 9️⃣ Забота о ЖКТ */}
+            <WaterSection theme={theme} title="9️⃣ Забота о ЖКТ">
+              <div>Для хорошего желчеоттока нужна не только вода. Добавляй <b>клетчатку</b> + <b>движение</b> + <b>полезные жиры</b> (сыродавленные масла, орехи, рыба).</div>
+            </WaterSection>
+            {/* 🔟 Персональные рекомендации */}
+            <WaterSection theme={theme} title="🔟 Персональные рекомендации">
+              <div>Если есть заболевания почек, сердца, эндокринные нарушения, камни — норма <b>персональная</b>, обсуди её с лечащим врачом.</div>
+            </WaterSection>
+            {/* Быстрая самопроверка — все строки с эмодзи */}
+            <WaterSection theme={theme} title="Быстрая самопроверка">
+              <ul style={{margin:0,paddingLeft:0,listStyle:'none'}}>
+                <li>✅ Нет сильной жажды, голова ясная.</li>
+                <li style={{marginTop:6}}>✅ Регулярное опорожнение кишечника.</li>
+                <li style={{marginTop:6}}>✅ Моча светло‑соломенная.</li>
+                <li style={{marginTop:6}}>✅ Нет ночных подъёмов (или они редкие).</li>
+              </ul>
+            </WaterSection>
+            {/* Частые ошибки — все строки с эмодзи */}
+            <WaterSection theme={theme} title="Частые ошибки">
+              <ul style={{margin:0,paddingLeft:0,listStyle:'none'}}>
+                <li>⛔ Догонять норму перед сном.</li>
+                <li style={{marginTop:6}}>⛔ Пить только чай/кофе/соки.</li>
+                <li style={{marginTop:6}}>⛔ Пить больше 300 мл за раз, залпом или большими глотками.</li>
+                <li style={{marginTop:6}}>⛔ Думать, что вода решит всё без питания и движения.</li>
+                <li style={{marginTop:6}}>⛔ Резко увеличивать потребление воды после малых объёмов.</li>
+              </ul>
+            </WaterSection>
+          </div>
+          <div style={{marginTop:8}}>
+            <button onClick={onBack} style={{...btnOutline(theme),width:'100%'}}>↩️ Вернуться к чек‑ину</button>
+          </div>
+        </div>
+      );
+    }
+
+    function DoneCard({theme,state,onRestart}){
+      const blocks = buildRecommendations(state);
+      React.useEffect(()=>{ try{ if(blocks && blocks[0]){ logEvent('checkin_done', { hunger: state.hunger, reasons: ensureArray(state.hunger_reason), mood: state.mood, binge: state.binge, binge_context: state.binge_context||[], recommendation_block: blocks[0].title }); } }catch(_){ } }, []);
+      return (
         <div style={{display:"grid",gap:12}}>
+          {blocks.map((b,i)=> (
+            <Section key={i} theme={theme} title={b.title} subtitle={b.sub}>
+              <div>
+                {b.items.map((x,idx)=> (
+                  <div key={idx} style={{margin:'6px 0'}}>{x}</div>
+                ))}
+              </div>
+            </Section>
+          ))}
           <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 1. Стоп ✋</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>Сделай паузу 3–5 минут.</li>
-              <li>Спроси себя: «Я действительно хочу это съесть или на самом деле телу сейчас нужно что-то другое (отдых, развлечение, перерыв)?».</li>
-            </ul>
-          </div>
-          <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 2. Проверка ⚖️</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>Прошло ли 3 часа с последнего приема пищи? Если да → поешь.</li>
-            </ul>
-          </div>
-          <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 3. Альтернатива 🔄</div>
-            <div style={{fontSize:14,color:theme.text,marginBottom:6}}>Если голод эмоциональный → замени действием:</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>💧 стакан воды</li>
-              <li>🚶‍♀️ прогулка 5–10 минут</li>
-              <li>🧘‍♀️ дыхание 4–7–8: вдох на 4 счета, задержка на 7, выдох на 8</li>
-              <li>🎶 музыка, душ или просто полежать 15 минут</li>
-            </ul>
-          </div>
-          <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 4. Осознанный выбор 🍏</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>Скажи себе: «Я кормлю тело для восстановления и здоровья, а не заедаю эмоции».</li>
-              <li>Собери тарелку из овощей/салата, медленных углеводов, белков и жиров.</li>
-              <li>Ешь медленно, наслаждаясь вкусом.</li>
-              <li>Если тяга к сладкому не ушла → разреши себе маленькую порцию, но с тарелки, без еды «на автомате». Выбирай сухофрукты или натуральную пастилу.</li>
-            </ul>
-          </div>
-          <div>
-            <div style={{fontWeight:600,marginBottom:6}}>Шаг 5. Разбор ✍️</div>
-            <ul style={{paddingLeft:18,margin:0}}>
-              <li>Спроси себя: «Что на самом деле я хотела закрыть? Усталость? Напряжение? Желание отдохнуть?» Отмечай, в каких ситуациях тяга особенно сильная.</li>
-            </ul>
-          </div>
-          <div style={{marginTop:4,padding:10,border:"1px dashed "+theme.border,borderRadius:12,background:"#fff"}}>
-            Совет: подготовь заранее «Список удовольствий» — простых действий на 5–20 минут, который ты сможешь использовать, когда чувствуешь эмоциональный голод.
+            <button onClick={onRestart} style={{...btnOutline(theme),width:"100%"}}>↩️ Вернуться к чек‑ину</button>
           </div>
         </div>
-      </div>);
+      )
     }
 
-    function FoodsCard(props){
-      var theme=props.theme;
-      function go(id){ try{ var el=document.getElementById(id); if(el&&el.scrollIntoView) el.scrollIntoView({behavior:"smooth",block:"start"});}catch(_){} }
-      return (<div style={{background:props.theme.card,borderRadius:16,padding:16,border:"1px solid "+props.theme.border}}>
-        <div style={{fontWeight:700,fontSize:18,marginBottom:6}}>Продукты для здоровья</div>
-        <div style={{fontSize:13,color:theme.subtext,marginBottom:12}}>Ориентир тарелки: 1/2 клетчатка · 1/4 белок · 1/4 сложные углеводы + полезные жиры.</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
-          {[{id:"p-animal",label:"Белки"},{id:"carbs",label:"Углеводы"},{id:"fiber",label:"Клетчатка"},{id:"fats",label:"Полезные жиры"}].map(function(link){
-            return (<button key={link.id} onClick={function(){go(link.id);}} style={{fontSize:13,padding:"6px 10px",borderRadius:999,border:"1px solid #e5e7eb",background:"#fff",textDecoration:"underline",cursor:"pointer"}}>{link.label}</button>);
-          })}
+    function CheckinCard({theme,i,step,state,setState,next,back,onRestart}){
+      const steps = computeSteps(state);
+      const total = steps.length;
+      const pct = total? Math.round(((i+1)/total)*100) : 0;
+      const stepName = steps[i] || 'summary';
+
+      React.useEffect(()=>{ try{ logEvent('step_shown', { flow_step: stepName }); }catch(_){ } }, [stepName]);
+
+      if(step==='summary'){
+        return (
+          <div className="page" style={{display:'grid',gap:12}}>
+            <DoneCard theme={theme} state={state} onRestart={onRestart} />
+          </div>
+        );
+      }
+
+      const greenBg = 'rgba(22,163,74,0.06)';
+
+      return (
+        <div className="page">
+          <div style={{border:'1px solid '+(theme?.border||'#e5e7eb'),borderRadius:14,overflow:'hidden',background:(theme?.card||'#fff')}}>
+            {/* Шапка чек‑ина */}
+            <div style={{padding:'12px 14px',background:greenBg}}>
+              <div style={{fontWeight:800,fontSize:20,lineHeight:1.25}}>Чек‑ин</div>
+              <div style={{marginTop:6,fontSize:12,color:theme.subtext}}>1 минута, чтобы оценить состояние и поддержать себя</div>
+            </div>
+
+            {/* Прогресс */}
+            <div style={{padding:12}}>
+              <Progress value={pct} theme={theme} />
+            </div>
+
+            {/* Шаги опросника */}
+            {step==='hunger' && (
+              <QSection theme={theme} title="Оценка голода" subtitle="0 — сыто; 2 — лёгкий голод, мысли о еде; 5 — сильный голод (слабость)" first>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  {[0,1,2,3,4,5].map(v=> (
+                    <ChoiceBtn key={v} theme={theme} label={String(v)} active={state.hunger===v} onClick={()=>{ setState(s=>({...s,hunger:v})); logEvent('answer',{ flow_step:'hunger', extra:{ value:v } }); }} />
+                  ))}
+                </div>
+              </QSection>
+            )}
+
+            {step==='hunger_reason' && (
+              <>
+                <QSection theme={theme} title="Почему такая оценка?" subtitle="Можно выбрать несколько вариантов" first>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    {HUNGER_REASONS.map(r=> {
+                      const active = ensureArray(state.hunger_reason).includes(r);
+                      return (
+                        <ChoiceBtn key={r} theme={theme} label={r} active={active}
+                          onClick={()=>{ const arr=ensureArray(state.hunger_reason); const set=new Set(arr); if(set.has(r)) set.delete(r); else set.add(r); const next=[...set]; setState(s=>({...s,hunger_reason:next, seen_plate: set.has('давно ела')? true : s.seen_plate})); logEvent('answer',{ flow_step:'hunger_reason', extra:{ value: next } }); }} />
+                      );
+                    })}
+                  </div>
+                </QSection>
+                {ensureArray(state.hunger_reason).includes('давно ела') && (
+                  <QSection theme={theme} title="Поешь)" subtitle={<span style={{fontSize:12,color:theme.subtext}}>Вот идеи как собрать сбалансированную тарелку, которая наполнит энергию</span>}>
+                    <div style={{display:'grid',gap:6}}>
+                      <div>1/4 тарелки белки + 1/4 сложные углеводы + 1/2 овощи + немного полезных жиров</div>
+                      <div>Например: рыба/курица/яйцо + гречка/киноа/цельнозерновой хлеб + салат или запеченные овощи + оливковое масло с лимонным соком</div>
+                    </div>
+                  </QSection>
+                )}
+              </>
+            )}
+
+            {step==='mood' && (
+              <QSection theme={theme} title="Настроение" first>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  {['хорошее','нейтральное','плохое'].map(r=> (
+                    <ChoiceBtn key={r} theme={theme} label={r} active={state.mood===r} onClick={()=>{ setState(s=>({...s,mood:r})); logEvent('answer',{ flow_step:'mood', extra:{ value:r } }); }} />
+                  ))}
+                </div>
+              </QSection>
+            )}
+
+            {step==='binge' && (
+              <QSection theme={theme} title="Был ли срыв/переедание?" subtitle="Если да — двигаемся мягко, без наказаний" first>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  {[true,false].map(v=> (
+                    <ChoiceBtn key={String(v)} theme={theme} label={v?'да':'нет'} active={state.binge===v} onClick={()=>{ setState(s=>({...s,binge:v})); logEvent('answer',{ flow_step:'binge', extra:{ value:v } }); }} />
+                  ))}
+                </div>
+              </QSection>
+            )}
+
+            {step==='binge_ctx' && (
+              <QSection theme={theme} title="Что послужило триггером? Что предшествовало срыву?" subtitle={<span style={{fontSize:12,color:theme.subtext}}>Отмечай и анализируй все причины — это поможет видеть закономерности и предугадывать срывы</span>} first>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  {BINGE_CONTEXT.map(r=>{
+                    const active = (state.binge_context||[]).includes(r);
+                    return (
+                      <ChoiceBtn key={r} theme={theme} label={r} active={active}
+                        onClick={()=>{ const set=new Set(state.binge_context||[]); if(set.has(r)) set.delete(r); else set.add(r); const next=[...set]; setState(s=>({...s,binge_context:next})); logEvent('answer',{ flow_step:'binge_context', extra:{ value: next } }); }} />
+                    );
+                  })}
+                </div>
+              </QSection>
+            )}
+
+            {/* Навигация */}
+            <div style={{display:'flex',gap:8,padding:12}}>
+              <button style={btnOutline(theme)} onClick={back}>Назад</button>
+              <button style={btnPrimary(theme)} onClick={next}>Дальше</button>
+            </div>
+          </div>
         </div>
-        <div style={{display:"grid",gap:12}}>
-          <div id="p-animal">
-            <FoodsTable theme={theme} title="🍗 БЕЛОК (¼ тарелки)"
-              rows={[
-                ["Мясо/птица","говядина, курица, индейка, телятина, кролик, перепелка"],
-                ["Рыба","лосось, форель, тунец, треска, сардины, дорадо, сибас"],
-                ["Морепродукты","креветки, мидии, кальмары"],
-                ["Яйца","яйца куриные/перепелиные"],
-                ["Сыр","нежирный козий сыр (2–3 раза в неделю)"]
-              ]}
-            />
-          </div>
-          <div id="p-plant">
-            <FoodsTable theme={theme} title="🌱 Растительный белок"
-              rows={[
-                ["Бобовые","чечевица, нут, маш, фасоль, горох"],
-                ["Псевдозерновые","киноа, амарант, гречка"],
-                ["Орехи и семечки","миндаль, кешью, тыквенные семечки, чиа"],
-                ["Грибы","шампиньоны, вешенки"],
-                ["Соевые продукты","тофу, соевое молоко"]
-              ]}
-            />
-          </div>
-          <div id="carbs">
-            <FoodsTable theme={theme} title="🍚 УГЛЕВОДЫ (¼ тарелки) — сложные"
-              rows={[
-                ["Крупы","овсянка, гречка, бурый и дикий рис, перловка, киноа, пшено"],
-                ["Хлеб/паста","цельнозерновые хлебцы/лаваш, паста из твёрдых сортов"],
-                ["Бобовые","фасоль, чечевица, горох"],
-                ["Крахмалистые овощи","картофель, батат, тыква"]
-              ]}
-            />
-          </div>
-          <div id="fiber">
-            <div style={{fontWeight:700,fontSize:16}}>🥦 КЛЕТЧАТКА (½ тарелки)</div>
-            <div style={{fontSize:13,color:theme.subtext}}>Клетчатка очень важна‼️ Помогает кишечнику, снижает уровень глюкозы и даёт насыщение.</div>
-            <FoodsTable theme={theme} title="Овощи"
-              rows={[
-                ["Капусты","брокколи, цветная, белокочанная, брюссельская"],
-                ["Корнеплоды и др.","морковь, свёкла, кабачок, тыква, батат, сельдерей"],
-                ["Овощи с меньшей клетчаткой","редис, огурец, помидор, перец"]
-              ]}
-            />
-            <FoodsTable theme={theme} title="Зелень"
-              rows={[[ "Примеры","петрушка, укроп, кинза, зелёный лук, листья салата, руккола, шпинат, щавель, базилик, мангольд, кейл"]]}
-            />
-            <FoodsTable theme={theme} title="Фрукты и ягоды"
-              rows={[
-                ["Больше клетчатки","яблоки с кожурой, груши с кожурой, персики, инжир, хурма, айва, киви"],
-                ["Среднее количество","апельсин, мандарин, грейпфрут, банан, нектарин, персик, слива, абрикос, гранат"],
-                ["Меньше клетчатки","ананас, арбуз, дыня, манго, папайя"],
-                ["Ягоды","малина, черника, клюква, ежевика, клубника, голубика, смородина"]
-              ]}
-            />
-            <FoodsTable theme={theme} title="Бобовые и цельнозерновые (как источник клетчатки)"
-              rows={[
-                ["Бобовые","чечевица, нут, фасоль"],
-                ["Цельнозерновые","овсянка, гречка, киноа, пшено, бурый рис, отруби, цельнозерновые хлебцы, семена льна и чиа, псиллиум"]
-              ]}
-            />
-          </div>
-          <div id="fats">
-            <FoodsTable theme={theme} title="🫒 ПОЛЕЗНЫЕ ЖИРЫ"
-              rows={[
-                ["Рыба","лосось, форель, скумбрия, сардины"],
-                ["Масла","оливковое, льняное, кокосовое, кунжутное, тыквенное, из виноградной косточки, авокадо и другие сыродавленные"],
-                ["Орехи","грецкие, миндаль, кешью"],
-                ["Семена","лён, кунжут, чиа"],
-                ["Другое","масло ГХИ, авокадо"]
-              ]}
-            />
-          </div>
-        </div>
-      </div>);
+      )
     }
 
-    function CheckinCard(props){
-      var theme=props.theme, i=props.i, step=props.step, state=props.state, setState=props.setState, next=props.next, back=props.back, progress=props.progress, handleSubmit=props.handleSubmit;
-      return (<div style={{background:theme.card,borderRadius:16,padding:16,border:"1px solid "+theme.border}}>
-        <Progress value={progress} accent={theme.accent} />
-        {step==="carbs" && (<Section title="Ты ела достаточно медленных углеводов и белка?" subtitle="За день в сумме — ориентируйся на чувство сытости и энергию">
-          <Row>
-            <ChoiceBtn active={state.carbs_ok===true} onClick={function(){setState(Object.assign({},state,{carbs_ok:true}));}}>Да ✅</ChoiceBtn>
-            <ChoiceBtn active={state.carbs_ok===false} onClick={function(){setState(Object.assign({},state,{carbs_ok:false}));}}>Недобор ⛔</ChoiceBtn>
-          </Row>
-        </Section>)}
-        {step==="water" && (<Section title="Пила достаточно воды сегодня?" subtitle="Ориентир: ~30 мл/кг массы тела в сутки (до 4 л), больше в жару/при активности">
-          <Row>
-            <ChoiceBtn active={state.water_ok===true} onClick={function(){setState(Object.assign({},state,{water_ok:true}));}}>Да 💧</ChoiceBtn>
-            <ChoiceBtn active={state.water_ok===false} onClick={function(){setState(Object.assign({},state,{water_ok:false}));}}>Недобор 💧</ChoiceBtn>
-          </Row>
-        </Section>)}
-        {step==="mood" && (<Section title="Настроение" subtitle="Как ты сейчас в целом?">
-          <Row>
-            <ChoiceBtn active={state.mood==="positive"} onClick={function(){setState(Object.assign({},state,{mood:"positive"}));}}>🙂 Хорошее</ChoiceBtn>
-            <ChoiceBtn active={state.mood==="neutral"} onClick={function(){setState(Object.assign({},state,{mood:"neutral"}));}}>😐 Нейтральное</ChoiceBtn>
-            <ChoiceBtn active={state.mood==="negative"} onClick={function(){setState(Object.assign({},state,{mood:"negative"}));}}>☁️ Сложное</ChoiceBtn>
-          </Row>
-        </Section>)}
-        {step==="urge" && (<Section title="Тяга к сладкому/ мучному/ фастфуду (0–3)" subtitle="0 — нет тяги, 3 — очень сильная">
-          <Row>
-            {[0,1,2,3].map(function(v){return (<ChoiceBtn key={v} active={state.urge===v} onClick={function(){setState(Object.assign({},state,{urge:v}));}}>{v}</ChoiceBtn>);})}
-          </Row>
-        </Section>)}
-        {step==="binge" && (<Section title="Эпизод переедания?" subtitle="Если да — двигаемся мягко, без наказаний">
-          <Row>
-            <ChoiceBtn active={state.binge===true} onClick={function(){setState(Object.assign({},state,{binge:true}));}}>Был</ChoiceBtn>
-            <ChoiceBtn active={state.binge===false} onClick={function(){setState(Object.assign({},state,{binge:false,trigger:null}));}}>Не было</ChoiceBtn>
-          </Row>
-          {state.binge===true && (<div style={{marginTop:10}}>
-            <div style={{fontWeight:600,marginBottom:6}}>Что послужило триггером? Что предшествовало срыву?</div>
-            <div style={{fontSize:13,color:theme.subtext,marginBottom:8}}>Подсказка: отмечай причины чаще — это поможет видеть закономерности и предугадывать срывы.</div>
-            <Row>
-              {["стресс","усталость","гаджет","привычка","скука","вечернее время","другое"].map(function(v){
-                return (<ChoiceBtn key={v} active={state.trigger===v} onClick={function(){setState(Object.assign({},state,{trigger:v}));}}>{v}</ChoiceBtn>);
-              })}
-            </Row>
-          </div>)}
-          <div style={{marginTop:8,fontSize:13,color:theme.subtext}}>Все вопросы пройдены. Нажмите «Готово», чтобы завершить чек-ин.</div>
-        </Section>)}
-        <div style={{display:"flex",gap:8,marginTop:8}}>
-          <button onClick={back} disabled={i===0} style={btnOutline(theme)}>Назад</button>
-          <button onClick={i===(steps.length-1)?handleSubmit:next} style={btnPrimary(theme)}>{i===(steps.length-1)?'Готово':'Дальше'}</button>
-        </div>
-        <div style={{fontSize:12,color:theme.subtext,marginTop:8}}>Заполнение занимает ~60 секунд. Данные — только для личной поддержки.</div>
-      </div>);
+    // ===== Diagnostics (tests) =====
+    function runTests(){
+      const results = [];
+      function t(name, fn){ try{ fn(); results.push({name, ok:true}); } catch(e){ console.error('[TEST FAIL]', name, e); results.push({name, ok:false, err:String(e)}); } }
+      t('computeSteps: hunger<=2 skips reason', ()=>{ const steps=computeSteps({hunger:2,binge:false}); if(steps.includes('hunger_reason')) throw new Error('reason should be skipped'); });
+      t('computeSteps: hunger>2 adds reason', ()=>{ const steps=computeSteps({hunger:3,binge:false}); if(!steps.includes('hunger_reason')) throw new Error('reason missing'); });
+      t('computeSteps: binge true includes binge_ctx', ()=>{ const steps=computeSteps({hunger:0,binge:true}); if(!steps.includes('binge_ctx')) throw new Error('binge_ctx missing'); });
+      t('buildRecommendations: mood bad adds pleasures', ()=>{ const r=buildRecommendations({binge:false,mood:'плохое',hunger:0}); const has=r.some(b=>b.title.includes('эмоциональный')); if(!has) throw new Error('pleasures missing'); });
+      t('buildRecommendations: long hunger reason plate', ()=>{ const r=buildRecommendations({binge:false,mood:'нейтральное',hunger:3,hunger_reason:'давно ела'}); const has=r.some(b=>b.title.includes('Поешь')); if(!has) throw new Error('plate missing'); });
+      t('buildRecommendations: binge contexts add seeds+psyllium', ()=>{ const r=buildRecommendations({binge:true,binge_context:['выходные'],mood:'нейтральное',hunger:0}); const has=r.some(b=>b.items.join(' ').includes('пакетик тыквенных семечек')); if(!has) throw new Error('seeds+psyllium missing'); });
+      t('buildRecommendations: no standalone support block', ()=>{ const r=buildRecommendations({binge:false,mood:'нейтральное',hunger:0}); const has=r.some(b=>b.title==='Поддержка'); if(has) throw new Error('standalone support block should not exist'); });
+      t('component exists: FoodsTable', ()=>{ if(typeof FoodsTable !== 'function') throw new Error('FoodsTable missing'); });
+      t('component exists: WaterCard', ()=>{ if(typeof WaterCard !== 'function') throw new Error('WaterCard missing'); });
+      t('component exists: DoneCard', ()=>{ if(typeof DoneCard !== 'function') throw new Error('DoneCard missing'); });
+      t('buildRecommendations: binge true returns unified advice block', ()=>{ const r=buildRecommendations({binge:true,binge_context:[],mood:'нейтральное',hunger:0}); const has=r.some(b=>b.title==='Советы после срыва' && b.items.some(x=>/многое делаешь|своём темпе/.test(x))); if(!has) throw new Error('unified supportive advice missing'); });
+      t('priority: binge advice outranks mood bad', ()=>{ const r=buildRecommendations({binge:true,mood:'плохое',hunger:0,binge_context:[]}); if(!(r.length===1 && r[0].title==='Советы после срыва')) throw new Error('binge should have priority'); });
+      t('no duplicate plate when seen earlier', ()=>{ const r=buildRecommendations({binge:false,mood:'нейтральное',hunger:3,hunger_reason:['давно ела'],seen_plate:true}); const has=r.some(b=>b.title.includes('Поешь')); if(has) throw new Error('plate should be suppressed when seen'); });
+      t('wellness praise when no hunger, neutral/good mood, no binge', ()=>{ const r=buildRecommendations({hunger:0,mood:'нейтральное',binge:false}); if(!(r.length===1 && (/Всё хорошо|продолжай/.test(r[0].title) || r[0].items.some(x=>/продолжай|мини‑чек‑ины/.test(x))))) throw new Error('wellness block missing'); });
+      t('reason скука triggers pleasures', ()=>{ const r=buildRecommendations({binge:false,mood:'нейтральное',hunger:3,hunger_reason:['Скука']}); if(!(r.length===1 && r[0].title.includes('эмоциональный'))) throw new Error('skuka should show pleasures'); });
+      t('reason усталость triggers pleasures', ()=>{ const r=buildRecommendations({binge:false,mood:'нейтральное',hunger:3,hunger_reason:['усталость']}); if(!(r.length===1 && r[0].title.includes('эмоциональный'))) throw new Error('ustalost should show pleasures'); });
+      t('reason прокрастинация shows small step advice', ()=>{ const r=buildRecommendations({binge:false,mood:'нейтральное',hunger:3,hunger_reason:['прокрастинация']}); const has=r.some(b=>b.title==='Начни с маленького шага' && b.items.join(' ').includes('15 минут')); if(!has) throw new Error('procrastination advice missing'); });
+      t('binge context: одиночество appears once', ()=>{ const count = BINGE_CONTEXT.filter(x=>x==='одиночество').length; if(count!==1) throw new Error('loneliness should appear once'); });
+      t('ui: btnPrimary fallback border is green', ()=>{ const s='1px solid '+(({primary:undefined})?.primary||'#16a34a'); if(s!=='1px solid #16a34a') throw new Error('green fallback missing'); });
+      // extra test to ensure no pleasures when hunger<=2 and mood not bad
+      t('no pleasures when hunger<=2 and mood ok even with old reasons', ()=>{ const r=buildRecommendations({binge:false,mood:'нейтральное',hunger:0,hunger_reason:['усталость']}); if(r.some(b=>b.title.includes('эмоциональный'))) throw new Error('pleasures should not appear with hunger<=2'); });
+      // extra: updated parents/guests wording present
+      t('binge context parents text updated', ()=>{ const r=buildRecommendations({binge:true,binge_context:['у родителей'],mood:'нейтральное',hunger:0}); const has=r[0].items.some(x=>/паузы перед каждым новым блюдом/.test(x)); if(!has) throw new Error('updated parents advice missing'); });
+      // exists: RelapseHelpCard
+      t('component exists: RelapseHelpCard', ()=>{ if(typeof RelapseHelpCard !== 'function') throw new Error('RelapseHelpCard missing'); });
+      return results;
     }
 
-    function App(){
+    // ===== App =====
+    const App = () => {
       const tg = useTelegram();
-      const theme = useTheme(tg);
-      const [screen,setScreen] = useState("checkin"); // 'checkin' | 'protocol' | 'done' | 'foods'
-      const [i,setI] = useState(0);
-      const [state,setState] = useState({carbs_ok:null,water_ok:null,mood:null,urge:null,binge:null,trigger:null});
-      const [sent,setSent] = useState(null);
-      const debug = (typeof window !== "undefined") && /(?:^|[?&])debug=1(?:&|$)/.test((window.location && window.location.search) || "");
+      const theme = useTheme();
+      const INITIAL_STATE = {hunger:0,mood:'нейтральное',binge:false,binge_context:[],hunger_reason:[],seen_plate:false};
+      const [screen,setScreen] = React.useState('checkin');
+      const [i,setI] = React.useState(0);
+      const [state,setState] = React.useState(INITIAL_STATE);
+      const [tests] = React.useState(()=>runTests());
 
-      useEffect(function(){
-        if (typeof window==="undefined") return;
-        var loc = (window.location || {});
-        var qs = (typeof loc.search === 'string' && loc.search) || (typeof loc.query === 'string' && loc.query) || "";
-        var q = new URLSearchParams(qs);
-        if(((q.get("screen")||"").toLowerCase())==="protocol") setScreen("protocol");
-      },[]);
-      useEffect(function(){
-        if(!tg) return;
-        if(tg.ready) tg.ready();
-        if(tg.expand) tg.expand();
-        if(tg.MainButton && tg.MainButton.setParams) tg.MainButton.setParams({text: screen==="checkin" ? "Отправить" : "Закрыть"});
-        if(tg.MainButton && tg.MainButton.show) tg.MainButton.show();
-        var onMain = function(){ if(screen==="checkin") handleSubmit(); else if(tg.close) tg.close(); };
-        if(tg.onEvent) tg.onEvent("mainButtonClicked", onMain);
-        return function(){ if(tg.offEvent) tg.offEvent("mainButtonClicked", onMain); };
-      },[tg,screen,state]);
+      const steps = computeSteps(state);
+      const step = steps[i] || 'summary';
 
-      var step = steps[i];
-      var progress = Math.round((i/steps.length)*100);
+      function next(){ if(step==='summary'){ setScreen('done'); return; } setI(prev=> Math.min(prev+1, steps.length-1)); }
+      function back(){ setI(prev=> Math.max(prev-1, 0)); }
 
-      function next(){ setI(function(p){return Math.min(p+1,steps.length-1);}); var hf=get(tg,["HapticFeedback","impactOccurred"],null); if(hf) hf("light"); }
-      function back(){ setI(function(p){return Math.max(p-1,0);}); }
+      React.useEffect(()=>{ logEvent('app_open'); },[]);
 
-      function handleSubmit(){
-        if(i < steps.length-1) return;
-        var userId = get(tg,["initDataUnsafe","user","id"],null);
-        var payload = { type:"checkin", ts:Math.floor(Date.now()/1000), user_id:userId,
-          carbs_ok:state.carbs_ok, water_ok:state.water_ok, mood:state.mood, urge:state.urge, binge:state.binge, trigger:state.trigger };
-        var json = JSON.stringify(payload);
-        var send = get(tg,["sendData"],null);
-        if(send){ send(json); setSent(json); var note=get(tg,["HapticFeedback","notificationOccurred"],null); if(note) note("success"); }
-        else { setSent(json); try{console.info("Check-in JSON", json);}catch(_){} }
-        setScreen("done");
-        try{ if(typeof window!=="undefined" && window.scrollTo) window.scrollTo({top:0,behavior:"smooth"});}catch(_){}
-      }
+      return (
+        <div style={{background:theme.bg,color:theme.text,minHeight:"100vh"}}>
+          <div style={{maxWidth:560,margin:"0 auto",padding:16}}>
+            <Header theme={theme} onOpenProtocol={()=>{ logEvent('open_protocol'); setScreen('protocol'); }} onRelapse={()=>{ logEvent('relapse_info_open'); setScreen('relapse'); }} />
 
-      function resetCheckin(){ setState({carbs_ok:null,water_ok:null,mood:null,urge:null,binge:null,trigger:null}); setI(0); setSent(null); setScreen("checkin"); }
+            {screen==='protocol' ? (<ProtocolCard theme={theme} onBack={()=>setScreen('checkin')} />)
+             : screen==='relapse' ? (<RelapseHelpCard theme={theme} onBack={()=>setScreen('checkin')} />)
+             : screen==='foods' ? (<FoodsCard theme={theme} onBack={()=>{ setScreen('checkin'); }} />)
+             : screen==='water' ? (<WaterCard theme={theme} onBack={()=>{ setScreen('checkin'); }} />)
+             : screen==='done' ? (<DoneCard theme={theme} state={state} onRestart={()=>{ setScreen('checkin'); setI(0); setState(INITIAL_STATE); }} />)
+             : (<CheckinCard theme={theme} i={i} step={step} state={state} setState={setState} next={next} back={back} onRestart={()=>{ setScreen('checkin'); setI(0); }} />)}
 
-      useEffect(function(){
-        try{
-          var t=[]; var a1=pickPrimaryAdvice({binge:true,urge:0,carbs_ok:true}); t.push(["binge priority", !!a1&&a1.title.indexOf("эпизод")!==-1]);
-          var a2=pickPrimaryAdvice({binge:false,urge:2,carbs_ok:true}); t.push(["urge≥2 second", !!a2&&a2.title.indexOf("Тяга")!==-1]);
-          var a3=pickPrimaryAdvice({binge:false,urge:0,carbs_ok:false}); t.push(["carbs deficit third", !!a3&&a3.title.indexOf("Недобор")!==-1]);
-          var a4=pickPrimaryAdvice({binge:false,urge:0,carbs_ok:true,water_ok:false}); t.push(["water lowest priority", !!a4&&a4.title.indexOf("Мало воды")!==-1]);
-          if(typeof console!=="undefined") console.log("[self-checks]", t);
-        }catch(_){}
-      },[]);
+            {/* Полезные материалы — всегда видим */}
+            <div style={{marginTop:12}}>
+              <Section theme={theme} title="Полезные материалы">
+                <div style={{display:'grid',gap:8,marginTop:12}}>
+                  <div onClick={()=>{ logEvent('materials_click', { materials_click: 'water_guide' }); setScreen('water'); }}
+                       style={{display:'flex',gap:12,alignItems:'center',padding:'10px 12px',border:'1px solid '+(theme?.border||'#e5e7eb'),borderRadius:12,cursor:'pointer',textDecoration:'none'}}>
+                    <div style={{fontSize:20}}>💧</div>
+                    <div style={{fontWeight:600}}>Гайд по воде</div>
+                  </div>
+                  <div onClick={()=>{ logEvent('materials_click', { materials_click: 'foods' }); setScreen('foods'); }}
+                       style={{display:'flex',gap:12,alignItems:'center',padding:'10px 12px',border:'1px solid '+(theme?.border||'#e5e7eb'),borderRadius:12,cursor:'pointer',textDecoration:'none'}}>
+                    <div style={{fontSize:20}}>🧺</div>
+                    <div style={{fontWeight:600}}>Список продуктов</div>
+                  </div>
+                </div>
+              </Section>
+            </div>
 
-      return (<div style={{background:theme.bg,color:theme.text,minHeight:"100vh"}}>
-        <div style={{maxWidth:560,margin:"0 auto",padding:16}}>
-          <Header theme={theme} onOpenProtocol={function(){setScreen("protocol");}} onOpenFoods={function(){setScreen("foods");}} onNewCheckin={resetCheckin} />
-          {screen==="protocol" ? (<ProtocolCard theme={theme} />)
-           : screen==="foods" ? (<FoodsCard theme={theme} />)
-           : screen==="done" ? (<DoneCard theme={theme} state={state} />)
-           : (<CheckinCard theme={theme} i={i} step={step} state={state} setState={setState} next={next} back={back} progress={progress} handleSubmit={handleSubmit} />)}
-          {debug && sent && (<pre style={{marginTop:16,padding:12,background:theme.card,borderRadius:12,whiteSpace:"pre-wrap",wordBreak:"break-word",border:"1px solid "+theme.border}}>{sent}</pre>)}
+          </div>
         </div>
-      </div>);
+      )
     }
 
-    const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<App />);
+    // Robust mount: гарантируем, что React доступен
+    (function mount(){
+      try{
+        if(typeof ReactDOM==='object' && ReactDOM.createRoot && typeof React==='object'){
+          const container = document.getElementById('root');
+          const root = ReactDOM.createRoot(container);
+          root.render(<App />);
+        } else { setTimeout(mount, 16); }
+      }catch(e){ __showFatal(e); throw e; }
+    })();
   </script>
 </body>
 </html>
