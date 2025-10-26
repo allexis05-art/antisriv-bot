@@ -59,29 +59,37 @@
     window.__analyticsState = { ok: null, lastError: null, lastResponse: null };
 
     async function sendAnalytics(payload){
-      try {
-        const res = await fetch(ANALYTICS_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(payload)
-        });
-        window.__analyticsState = { ok:true, lastError:null, lastResponse:null };
-        if(DEBUG) console.log('[analytics] sent (no-cors opaque)', { payload });
-        return { ok:true };
-      } catch (e) {
-        try {
-          const blob = new Blob([JSON.stringify(payload)], { type: 'text/plain;charset=utf-8' });
-          const ok = navigator.sendBeacon ? navigator.sendBeacon(ANALYTICS_URL, blob) : false;
-          window.__analyticsState = { ok, lastError: ok? null : 'sendBeacon failed', lastResponse:null };
-          if(DEBUG) console.log('[analytics] sendBeacon', ok);
-          return { ok };
-        } catch(_) {}
-        window.__analyticsState = { ok:false, lastError:String(e), lastResponse:null };
-        if(DEBUG) console.error('[analytics] failed', e);
-        return { ok:false, error:e };
-      }
-    }
+  try {
+    // Шлём как форму — без preflight и без CORS-ошибок, легко читать на GAS
+    const body = new URLSearchParams({ payload: JSON.stringify(payload) });
+
+    await fetch(ANALYTICS_URL, {
+      method: 'POST',
+      // mode: 'no-cors' можно убрать — для формы часто не нужен preflight.
+      // Но если хотите гарантированно избежать CORS-проверок, оставьте:
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
+      body
+    });
+
+    // В no-cors ответ "opaque" — считаем успехом.
+    window.__analyticsState = { ok:true, lastError:null, lastResponse:null };
+    if (DEBUG) console.log('[analytics] sent (form, opaque)');
+    return { ok:true };
+  } catch (e) {
+    // Fallback: sendBeacon
+    try {
+      const blob = new Blob([new URLSearchParams({ payload: JSON.stringify(payload) })], { type: 'application/x-www-form-urlencoded;charset=utf-8' });
+      const ok = navigator.sendBeacon ? navigator.sendBeacon(ANALYTICS_URL, blob) : false;
+      window.__analyticsState = { ok, lastError: ok? null : 'sendBeacon failed', lastResponse:null };
+      if (DEBUG) console.log('[analytics] sendBeacon(form)', ok);
+      return { ok };
+    } catch(_) {}
+    window.__analyticsState = { ok:false, lastError:String(e), lastResponse:null };
+    if (DEBUG) console.error('[analytics] failed', e);
+    return { ok:false, error:e };
+  }
+}
 
     async function logEvent(event, data = {}) {
       const body = {
