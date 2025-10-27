@@ -195,7 +195,8 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
     background: theme.primary,      // ✅ зелёный
     color: theme.primaryText,       // ✅ белый
     border: "1px solid " + theme.primary,
-    borderRadius: 9999,
+    borderRadius: 12,
+    fontSize:14, padding:'10px 12px',fontWeight:400
     // остальные стили...
   };
 }
@@ -204,7 +205,8 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
     background: theme.card,
     color: theme.text,
     border: "1px solid " + theme.primary, // ✅ зелёная рамка
-    borderRadius: 9999,
+    borderRadius: 12,
+    fontSize:14, padding:'10px 12px',fontWeight:400
     // остальные стили...
   };
 }
@@ -743,7 +745,7 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
             )}
 
             {/* Навигация */}
-            <div style={{display:'flex',gap:8,padding:12}}>
+            <div style={{display:'flex',gap:10,padding:16}}>
               <button style={btnOutline(theme)} onClick={back}>Назад</button>
               <button style={btnPrimary(theme)} onClick={next}>Дальше</button>
             </div>
