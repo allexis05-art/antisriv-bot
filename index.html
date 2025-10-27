@@ -195,7 +195,7 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
     background: theme.primary,      // ✅ зелёный
     color: theme.primaryText,       // ✅ белый
     border: "1px solid " + theme.primary,
-    borderRadius:12
+   borderRadius:9999
     // остальные стили...
   };
 }
@@ -204,7 +204,7 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
     background: theme.card,
     color: theme.text,
     border: "1px solid "+ theme.primary, // ✅ зелёная рамка
-    borderRadius:12
+    borderRadius:9999
     // остальные стили...
   };
 }
@@ -251,7 +251,7 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
 
     function QSection({title,subtitle,children,theme,first=false}){
       return (
-        <div style={{padding:12,borderTop:first?'none':('1px solid '+(theme?.border||'#e5e7eb'))}}>
+        <div style={{padding:12,borderRadius:9999, borderTop:first?'none':('1px solid '+(theme?.border||'#e5e7eb'))}}>
           <div style={{fontWeight:600}}>{title}</div>
           {subtitle && <div style={{fontSize:12,color:theme.subtext,marginTop:4}}>{subtitle}</div>}
           <div style={{marginTop:8}}>{children}</div>
@@ -262,7 +262,7 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
     function ChoiceBtn({label,active,onClick,theme}){
       return (
         <button onClick={onClick}
-          style={{...btnOutline(theme),padding:"10px 12px",borderColor:active?theme.primary:(theme?.border||'#e5e7eb'),background:active?"rgba(22,163,74,.08)":(theme?.card||'#fff')}}>
+          style={{...btnOutline(theme),padding:"10px 12px",borderColor:active?theme.primary:(theme?.border||'#e5e7eb'),borderRadius:9999,background:active?"rgba(22,163,74,.08)":(theme?.card||'#fff')}}>
           {label}
         </button>)
     }
