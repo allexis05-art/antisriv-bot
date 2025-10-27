@@ -195,7 +195,7 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
     background: theme.primary,      // ✅ зелёный
     color: theme.primaryText,       // ✅ белый
     border: "1px solid " + theme.primary,
-   borderRadius:9999
+   borderRadius:12
     // остальные стили...
   };
 }
@@ -204,7 +204,7 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
     background: theme.card,
     color: theme.text,
     border: "1px solid "+ theme.primary, // ✅ зелёная рамка
-    borderRadius:9999
+    borderRadius:12
     // остальные стили...
   };
 }
@@ -262,7 +262,7 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
     function ChoiceBtn({label,active,onClick,theme}){
       return (
         <button onClick={onClick}
-          style={{...btnOutline(theme),fontSize:16,padding:"10px 12px",borderColor:active?theme.primary:(theme?.border||'#e5e7eb'),borderRadius:9999,background:active?"rgba(22,163,74,.08)":(theme?.card||'#fff')}}>
+          style={{...btnOutline(theme), fontWeight:700, fontSize:16, padding:'10px 12px',borderColor:active?theme.primary:(theme?.border||'#e5e7eb'),borderRadius:12,background:active?"rgba(22,163,74,.08)":(theme?.card||'#fff')}}>
           {label}
         </button>)
     }
