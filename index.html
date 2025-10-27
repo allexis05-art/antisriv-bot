@@ -1,59 +1,44 @@
 <!doctype html>
 <html lang="ru">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <title>Антисрыв — Telegram Mini App</title>
-    <meta name="theme-color" content="#16a34a" />
-    <style>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Антисрыв — Telegram Mini App</title>
+  <meta name="theme-color" content="#16a34a" />
+  <style>
     html,body{height:100%;margin:0}
     body{background:#fff;color:#1f2937;font-family:ui-sans-serif,system-ui,-apple-system,Roboto,Helvetica,Arial}
     body,button{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
-    
-    /* ✅ Сброс нативной стилизации кнопок в WebView (особенно iOS) */
-    button{ -webkit-appearance:none; appearance:none; background:none; border:none; color:inherit; }
-    button:focus-visible{ outline:2px solid #16a34a; outline-offset:2px; }
-    
-    a{ color:#16a34a; text-decoration:none; }
-    a.underlined{ text-decoration:underline; }
-    
-    .page{padding-bottom:calc(16px + env(safe-area-inset-bottom));}
+    .page{padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+    a{color:#16a34a}
     .error-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);color:#fff;display:none;align-items:center;justify-content:center;text-align:left;padding:24px;z-index:9999}
     .error-overlay pre{white-space:pre-wrap;max-width:860px}
-    
-    /* Контейнер */
-    .wrap{max-width:560px;margin:0 auto;padding:16px;min-height:100%}
-    
-    /* Карточки */
-    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:12px}
-    .card.dark{background:#111827;border-color:#1f2937}
-    .card-h{padding:12px 14px;background:rgba(22,163,74,.06)}
-    .card-h.subtle{background:rgba(0,0,0,.035)}
-    .card-h .t{font-weight:800;line-height:1.25}
-    .card-h .s{margin-top:6px;font-size:12px;color:#6b7280}
-    .card-b{padding:12px}
-    
-    /* Кнопки */
-    .btn{display:inline-block;font-weight:700;border-radius:12px;cursor:pointer}
-    .btn-primary{font-size:16px;padding:12px 16px;background:#16a34a;border:1px solid #16a34a;color:#fff}
-    .btn-outline{font-size:16px;padding:12px 16px;background:#fff;border:1px solid #16a34a;color:#111827}
-    .btn-ghost{font-size:14px;padding:10px 12px;background:#fff;border:1px solid #e5e7eb;border-radius:10px}
-    
-    /* Прочее */
-    .grid{display:grid;gap:8px}
-    .row{display:flex;gap:8px;flex-wrap:wrap}
-    .center{text-align:center}
-    .mt-8{margin-top:8px}.mt-10{margin-top:10px}.mt-12{margin-top:12px}.mb-12{margin-bottom:12px}
-    .progress{height:8px;background:rgba(0,0,0,.08);border-radius:8px;overflow:hidden}
-    .progress > div{height:100%;background:#16a34a;transition:width .25s ease}
-    ul{padding-left:16px}
-    </style>
+    .list-table{width:100%;border-collapse:separate;border-spacing:0 12px}
+    .list-table th{font-size:12px;text-align:left;color:#6b7280;font-weight:600}
+    .list-table td{background:#fff}
+    /* Снимаем нативную стилизацию кнопок в iOS WebView */
+button {
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;  /* фон задаём вручную в стилях компонента */
+  border: none;      /* рамку задаём вручную */
+  color: inherit;
+}
+button:focus-visible {
+  outline: 2px solid #16a34a;
+  outline-offset: 2px;
+}
+
+/* Опционально: убираем синий хайлайт на iOS при тапе */
+* { -webkit-tap-highlight-color: rgba(0,0,0,0); }
+
+  </style>
   <!-- Telegram Web Apps SDK (может отсутствовать в предпросмотре) -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <!-- React 18 UMD -->
+  <!-- React 18 UMD (загружаем БЕЗ defer, чтобы гарантировать доступность до Babel-кода) -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel Standalone для JSX в этом демо -->
+  <!-- Babel Standalone для JSX в этом демо — тоже БЕЗ defer -->
   <script>window.BABEL_DISABLE_CACHE = true;</script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
@@ -61,10 +46,10 @@
   <div id="root">Загрузка…</div>
   <div id="err" class="error-overlay"><pre id="err-msg"></pre></div>
 
+  <!-- ВАЖНО: этот скрипт идёт ПОСЛЕ React/ReactDOM/Babel и потому не упирается в гонки загрузки -->
   <script type="text/babel" data-presets="env,react">
     'use strict';
-
-    // ====== Безопасный оверлей ошибок ======
+    // ===== Error boundary (global) =====
     (function(){
       const overlay = document.getElementById('err');
       const msg = document.getElementById('err-msg');
@@ -73,32 +58,9 @@
       window.addEventListener('unhandledrejection', ev => { __showFatal(ev.reason); });
     })();
 
-    // ====== Константы бренда ======
-var BRAND_PRIMARY = '#16a34a';
-var BRAND_PRIMARY_TEXT = '#ffffff';
-
-// ====== Telegram shim ======
-var TG_SHIM = { themeParams:{}, ready:function(){}, close:function(){}, openLink:function(url){ try{ window.open(url,'_blank','noopener'); }catch(e){ location.href=url; } }, sendData:function(){}, MainButton:{ setParams:function(){}, onClick:function(){}, offClick:function(){}, show:function(){}, hide:function(){} }, onEvent:function(){}, offEvent:function(){} };
-function get(obj, path, d){ try{ var cur=obj; for(var i=0;i<path.length;i++){ if(cur==null) return d; cur=cur[path[i]]; } return (cur===undefined?d:cur);}catch(e){return d;} }
-function useTelegram(){ var t=get(window,["Telegram","WebApp"],null)||TG_SHIM; try{ t.ready(); }catch(_){} return t; }
-
-// ====== Тема (фиксируем зелёный primary) ======
-function currentTheme(){
-var tg = useTelegram();
-var p = (tg && tg.themeParams) || {};
-var isDark = (p.bg_color && parseInt(String(p.bg_color).replace('#',''),16) < 0x888888);
-return {
-isDark:isDark,
-bg: p.bg_color || (isDark?"#0b1220":"#f8fafc"),
-text: p.text_color || (isDark?"#e5e7eb":"#111827"),
-subtext: p.hint_color || (isDark?"#9ca3af":"#6b7280"),
-primary: BRAND_PRIMARY,
-primaryText: BRAND_PRIMARY_TEXT,
-border: p.section_separator_color || (isDark?"#1f2937":"#e5e7eb"),
-card: isDark?"#111827":"#fff"
-};
-}
     // ===== Utils =====
+    const BRAND_PRIMARY = '#16a34a';     // emerald-600
+    const BRAND_PRIMARY_TEXT = '#ffffff';
     // --- Analytics: Google Apps Script collector ---
     const ANALYTICS_URL = 'https://script.google.com/macros/s/AKfycbxQShsQ562OAUS6e4g-z20LZLJ0SrsJU0yakyFUUpIpx0om2j4yYN3J-puDbQ19Zcfblg/exec?key=Dvhjhlkjf2033';
     // ANALYTICS_ENABLED not needed anymore (removed to avoid redeclaration)
@@ -200,6 +162,8 @@ card: isDark?"#111827":"#fff"
 
     function useTheme(){
       const tg = useTelegram();
+      const BRAND_PRIMARY = "#16a34a";
+const BRAND_PRIMARY_TEXT = "#ffffff";
       const compute = React.useCallback(()=>{
         const p = tg && tg.themeParams || {};
         const isDark = (p.bg_color && parseInt(String(p.bg_color).replace('#',''),16) < 0x888888);
@@ -226,14 +190,28 @@ card: isDark?"#111827":"#fff"
     }
 
     // ===== Buttons =====
-    function btnPrimary(theme){ return {fontSize:16,padding:"12px 16px",border:"1px solid "+(theme?.primary||'#16a34a'),background:(theme?.primary||'#16a34a'),color:(theme?.primaryText||'#fff'),borderRadius:12,cursor:"pointer",fontWeight:700} }
-    function btnOutline(theme){ return {fontSize:13,padding:"8px 12px",border:"1px solid "+(theme?.border||'#e5e7eb'),background:(theme?.card||'#fff'),color:(theme?.text||'#111827'),borderRadius:10,cursor:"pointer"} }
+    function btnPrimary(theme){
+  return {
+    background: theme.primary,      // ✅ зелёный
+    color: theme.primaryText,       // ✅ белый
+    border: "1px solid " + theme.primary,
+    // остальные стили...
+  };
+}
+    function btnOutline(theme){
+  return {
+    background: theme.card,
+    color: theme.text,
+    border: "1px solid " + theme.primary, // ✅ зелёная рамка
+    // остальные стили...
+  };
+}
 
     // ===== Progress =====
     function Progress({value, theme}){
       const v = clamp(Math.round(value),0,100);
       return (
-        <div style={{height:8,background:"rgba(0,0,0,0.08)",borderRadius:8,overflow:"hidden"}}>
+        <div style={{height:8,background: theme.primary,borderRadius:8,overflow:"hidden"}}>
           <div style={{width:v+"%",height:"100%",background:theme.primary,transition:"width .25s ease"}} />
         </div>
       )
