@@ -43,6 +43,8 @@
     })();
 
     // ===== Utils =====
+    const BRAND_PRIMARY = '#16a34a';     // emerald-600
+    const BRAND_PRIMARY_TEXT = '#ffffff';
     // --- Analytics: Google Apps Script collector ---
     const ANALYTICS_URL = 'https://script.google.com/macros/s/AKfycbxQShsQ562OAUS6e4g-z20LZLJ0SrsJU0yakyFUUpIpx0om2j4yYN3J-puDbQ19Zcfblg/exec?key=Dvhjhlkjf2033';
     // ANALYTICS_ENABLED not needed anymore (removed to avoid redeclaration)
@@ -152,8 +154,10 @@
           bg: p.bg_color || (isDark?"#0b1220":"#f8fafc"),
           text: p.text_color || (isDark?"#e5e7eb":"#111827"),
           subtext: p.hint_color || (isDark?"#9ca3af":"#6b7280"),
-          primary: p.button_color || "#16a34a", // emerald-600
-          primaryText: p.button_text_color || "#fff",
+         // primary: p.button_color || "#16a34a", // emerald-600
+         // primaryText: p.button_text_color || "#fff",
+          primary: BRAND_PRIMARY,           // <-- принудительно зелёный
+          primaryText: BRAND_PRIMARY_TEXT,  // <-- принудительно белый
           border: p.section_separator_color || (isDark?"#1f2937":"#e5e7eb"),
           card: isDark?"#111827":"#fff"
         }
