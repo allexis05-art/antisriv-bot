@@ -212,14 +212,41 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
 }
 
     // ===== Progress =====
-    function Progress({value, theme}){
-      const v = clamp(Math.round(value),0,100);
-      return (
-        <div style={{height:8,background: theme.primary,borderRadius:8,overflow:"hidden"}}>
-          <div style={{width:v+"%",height:"100%",background:theme.primary,transition:"width .25s ease"}} />
-        </div>
-      )
-    }
+   // function Progress({value, theme}){
+    //  const v = clamp(Math.round(value),0,100);
+      //return (<div style={{height:8,background: theme.primary,borderRadius:8,overflow:"hidden"}}>
+    //      <div style={{width:v+"%",height:"100%",background:theme.primary,transition:"width .25s ease"}} /> </div>)}
+// ===== Progress (bulletproof) =====
+function Progress({ value, theme }) {
+  const n = Number.isFinite(value) ? value : parseFloat(String(value).replace('%',''));
+  const v = clamp(Math.round(n), 0, 100); // 0..100
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        height: 8,
+        background: "rgba(0,0,0,0.08)",
+        borderRadius: 8,
+        overflow: "hidden"
+      }}
+    >
+      <div
+        // слой-заполнитель тянем scaleX, а не шириной — его не «перебивает» чужой CSS
+        style={{
+          position: "absolute",
+          inset: 0,
+          transformOrigin: "left center",
+          transform: `scaleX(${v / 100})`,
+          willChange: "transform"
+        }}
+      >
+        <div style={{ width: "100%", height: "100%", background: theme.primary }} />
+      </div>
+    </div>
+  );
+}
 
     // ===== Small UI =====
     function Section({title,subtitle,children,theme,variant}){
