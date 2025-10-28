@@ -369,8 +369,8 @@ function Progress({ value, theme }) {
         return [{title:"Возможен \"эмоциональный\" голод", items}];
       }
 // 2) Emotional: pleasures only for boredom
-      const pleasureReasons = ["скука"];
-      if((reasonsNorm.length>0 && hasAnyReason(reasonsNorm, pleasureReasons)) ){
+      const boredomReasons = ["скука"];                // ← новое имя
+if (reasonsNorm.length>0 && hasAnyReason(reasonsNorm, boredomReasons)) {
         const items=[
           "Отвлекись и выполни одно дело из запланированных на сегодня",
           "А если таких нет, то можно например",
