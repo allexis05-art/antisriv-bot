@@ -645,9 +645,19 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
 
     function CheckinCard({theme,i,step,state,setState,next,back,onRestart}){
       const steps = computeSteps(state);
-      const total = steps.length;
-      const pct = total? Math.round(((i+1)/total)*100) : 0;
-      const stepName = steps[i] || 'summary';
+
+// считаем прогресс только по "вопросным" шагам (до summary)
+const summaryIdx = steps.indexOf('summary');
+const totalQuestions = summaryIdx === -1 ? steps.length : summaryIdx;
+
+// сколько вопросов уже "покрыто" текущим шагом
+// (i — индекс текущего шага в steps; +1 чтобы текущий шаг тоже считался)
+const answered = Math.min(i + 1, totalQuestions);
+
+// процент прогресса
+const pct = totalQuestions ? Math.round((answered / totalQuestions) * 100) : 0;
+
+const stepName = steps[i] || 'summary';
 
       React.useEffect(()=>{ try{ logEvent('step_shown', { flow_step: stepName }); }catch(_){ } }, [stepName]);
 
