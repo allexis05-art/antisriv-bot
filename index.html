@@ -1,4 +1,4 @@
-<!doctype html>
+F<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
@@ -646,16 +646,15 @@ const BRAND_PRIMARY_TEXT = "#ffffff";
     function CheckinCard({theme,i,step,state,setState,next,back,onRestart}){
       const steps = computeSteps(state);
 
-// считаем прогресс только по "вопросным" шагам (до summary)
+// прогресс только по вопросам до summary
 const summaryIdx = steps.indexOf('summary');
-const totalQuestions = summaryIdx === -1 ? steps.length : summaryIdx;
+const totalQuestions = (summaryIdx === -1 ? steps.length : summaryIdx);
 
-// сколько вопросов уже "покрыто" текущим шагом
-// (i — индекс текущего шага в steps; +1 чтобы текущий шаг тоже считался)
-const answered = Math.min(i + 1, totalQuestions);
+// защищаемся: если i вдруг уехал за последний вопрос — подрезаем
+const safeI = Math.min(Math.max(i, 0), Math.max(totalQuestions - 1, 0));
 
-// процент прогресса
-const pct = totalQuestions ? Math.round((answered / totalQuestions) * 100) : 0;
+// итоговый процент
+const pct = totalQuestions ? Math.round(((safeI + 1) / totalQuestions) * 100) : 0;
 
 const stepName = steps[i] || 'summary';
 
@@ -683,6 +682,7 @@ const stepName = steps[i] || 'summary';
             {/* Прогресс */}
             <div style={{padding:12}}>
               <Progress value={pct} theme={theme} />
+               <div style={{fontSize:12, color: theme.subtext}}>{pct}%</div>
             </div>
 
             {/* Шаги опросника */}
